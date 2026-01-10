@@ -166,6 +166,48 @@ struct StopPlaytest {
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
+struct MoveCharacter {
+    #[schemars(description = "Target X coordinate in world space")]
+    x: f64,
+    #[schemars(description = "Target Y coordinate in world space")]
+    y: f64,
+    #[schemars(description = "Target Z coordinate in world space")]
+    z: f64,
+    #[schemars(
+        description = "If true, teleport instantly. If false, walk to position using Humanoid:MoveTo()"
+    )]
+    instant: Option<bool>,
+    #[schemars(
+        description = "Optional character name to move. If not specified, moves the first character found in workspace."
+    )]
+    character_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
+struct SimulateInput {
+    #[schemars(description = "Type of input: 'keyboard' or 'mouse'")]
+    input_type: String,
+    #[schemars(
+        description = "For keyboard: key name (e.g., 'W', 'Space', 'E', 'LeftShift'). For mouse: 'Left', 'Right', 'Middle'"
+    )]
+    key: String,
+    #[schemars(description = "Action type: 'begin' (key down), 'end' (key up), or 'tap' (quick press and release)")]
+    action: String,
+    #[schemars(description = "For mouse input: X position on screen")]
+    mouse_x: Option<f64>,
+    #[schemars(description = "For mouse input: Y position on screen")]
+    mouse_y: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
+struct ClickGui {
+    #[schemars(
+        description = "Path to the GUI element (e.g., 'PlayerGui.MainUI.PlayButton' or 'StarterGui.ScreenGui.Button')"
+    )]
+    path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
 enum ToolArgumentValues {
     RunCode(RunCode),
     InsertModel(InsertModel),
@@ -176,6 +218,9 @@ enum ToolArgumentValues {
     StartSimulation(StartSimulation),
     StopSimulation(StopSimulation),
     StopPlaytest(StopPlaytest),
+    MoveCharacter(MoveCharacter),
+    SimulateInput(SimulateInput),
+    ClickGui(ClickGui),
 }
 #[tool_router]
 impl RBXStudioServer {
@@ -302,6 +347,39 @@ impl RBXStudioServer {
         Parameters(_args): Parameters<StopPlaytest>,
     ) -> Result<CallToolResult, ErrorData> {
         self.generic_tool_run(ToolArgumentValues::StopPlaytest(StopPlaytest {}))
+            .await
+    }
+
+    #[tool(
+        description = "Moves or teleports a character in the workspace. Works in simulation mode where the plugin has direct access to the game. Use instant=true for teleporting or instant=false to walk to the position."
+    )]
+    async fn move_character(
+        &self,
+        Parameters(args): Parameters<MoveCharacter>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.generic_tool_run(ToolArgumentValues::MoveCharacter(args))
+            .await
+    }
+
+    #[tool(
+        description = "Simulates input by firing a BindableEvent that game scripts can listen to. Creates 'MCPInputEvent' in ReplicatedStorage. Games should connect to this event to handle simulated input for testing. This is the recommended way to test input-driven gameplay."
+    )]
+    async fn simulate_input(
+        &self,
+        Parameters(args): Parameters<SimulateInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.generic_tool_run(ToolArgumentValues::SimulateInput(args))
+            .await
+    }
+
+    #[tool(
+        description = "Programmatically clicks/activates a GUI element by path. Fires the Activated event on buttons. The path should point to a GuiButton (TextButton, ImageButton) or similar clickable element."
+    )]
+    async fn click_gui(
+        &self,
+        Parameters(args): Parameters<ClickGui>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.generic_tool_run(ToolArgumentValues::ClickGui(args))
             .await
     }
 
