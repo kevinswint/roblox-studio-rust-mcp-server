@@ -56,10 +56,8 @@ local function getOrCreateInputEvent(): BindableEvent
 end
 
 local function simulateInput(args: Types.SimulateInputArgs): string
-	-- Verify we're in a mode where we can interact with the game
-	if not RunService:IsRunning() then
-		error("Cannot simulate input: Studio must be in simulation or playtest mode. Use start_simulation first.")
-	end
+	-- Note: During playtest, RunService:IsRunning() returns false from plugin context
+	-- but we can still fire BindableEvents. We'll try and let it fail naturally.
 
 	local inputType = string.lower(args.input_type)
 	local action = string.lower(args.action)

@@ -30,10 +30,8 @@ local function findCharacter(characterName: string?): Model?
 end
 
 local function moveCharacter(args: Types.MoveCharacterArgs): string
-	-- Verify we're in a mode where we can interact with the game
-	if not RunService:IsRunning() then
-		error("Cannot move character: Studio must be in simulation or playtest mode. Use start_simulation first.")
-	end
+	-- Note: During playtest, RunService:IsRunning() returns false from plugin context
+	-- but we can still manipulate workspace objects. We'll try and let it fail naturally.
 
 	local targetPosition = Vector3.new(args.x, args.y, args.z)
 	local instant = args.instant or false
