@@ -33,6 +33,86 @@ write_script({
 
 ---
 
+### `capture_screenshot`
+
+Captures a screenshot of the Roblox Studio window and returns it as a JPEG image.
+
+**Why this matters:** Enables AI assistants to visually inspect the game state, verify UI changes, debug visual issues, and analyze workspace layouts without manual screenshots.
+
+**Parameters:** None
+
+**Features:**
+- Captures the Studio window directly (no plugin communication needed)
+- Supports macOS and Windows
+- Returns high-quality JPEG (up to 4096px, quality 85)
+- Requires Screen Recording permission on macOS
+
+**Example:**
+```
+capture_screenshot({})
+```
+
+---
+
+### `read_output`
+
+Reads captured output from Roblox Studio's Output window.
+
+**Why this matters:** Allows AI assistants to check for script errors, review print statements, and debug issues without manual intervention.
+
+**Parameters:**
+- `filter` (optional) - Filter by level: `"all"` (default), `"print"`, `"warn"`, or `"error"`
+- `max_lines` (optional) - Maximum lines to return (default: 1000, max: 10000)
+- `clear_after_read` (optional) - Clear buffer after reading (default: true)
+
+**Features:**
+- Captures print(), warn(), and error() messages during Edit and Play modes
+- Persistent buffer survives mode transitions
+- FIFO eviction with overflow warnings
+- Holds up to 10,000 messages
+
+**Example:**
+```
+read_output({ filter: "error", max_lines: 100 })
+```
+
+---
+
+### `get_studio_state`
+
+Gets the current Studio mode (edit/play/run) to determine if workspace modifications are safe.
+
+**Parameters:** None
+
+**Returns:** JSON with mode, isEdit, isRunning, and canModify flags
+
+**Example:**
+```
+get_studio_state({})
+// Returns: {"mode":"edit","isEdit":true,"isRunning":false,"canModify":true}
+```
+
+---
+
+### `start_playtest` / `start_simulation`
+
+Starts playtest or simulation mode.
+
+- `start_playtest` - Starts play mode with a player character
+- `start_simulation` - Starts run mode without a player (physics only)
+
+**Parameters:** None
+
+---
+
+### `stop_simulation` / `stop_playtest`
+
+Stops playtest/simulation and returns to edit mode.
+
+**Parameters:** None
+
+---
+
 ## Upstream Tools
 
 This fork includes all tools from the official repository:
@@ -64,7 +144,7 @@ This builds the MCP server, installs the Studio plugin, and configures Claude.
 ### Verify setup
 
 1. Open Roblox Studio and check the **Plugins** tab for the MCP plugin
-2. In Claude, verify tools are available: `run_code`, `insert_model`, and `write_script`
+2. In Claude, verify tools are available: `run_code`, `insert_model`, `write_script`, `capture_screenshot`, `read_output`, `get_studio_state`, `start_playtest`, `start_simulation`, `stop_simulation`, `stop_playtest`
 
 ---
 
