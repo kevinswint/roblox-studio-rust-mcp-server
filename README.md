@@ -1,3 +1,99 @@
+# Roblox Studio MCP Server (Enhanced Fork)
+
+> **Fork of [Roblox/studio-rust-mcp-server](https://github.com/Roblox/studio-rust-mcp-server) with additional tools for AI-assisted game development.**
+
+This fork adds new MCP tools that enable AI assistants to create complete, functional Roblox games. The upstream repository has not merged community contributions since July 2025.
+
+## Additional Tools in This Fork
+
+### `write_script`
+
+Creates or updates Script, LocalScript, or ModuleScript instances with provided Luau source code.
+
+**Why this matters:** The official MCP server can only execute code via `run_code`, but cannot create or modify script source directly. This is because Roblox blocks direct `Script.Source` access. This tool uses `ScriptEditorService:UpdateSourceAsync()` - the officially supported method for writing script source in Studio plugins.
+
+**Parameters:**
+- `path` - Path to script in game hierarchy (e.g., `ServerScriptService.Managers.GameManager`)
+- `source` - The Luau source code to write
+
+**Features:**
+- Creates scripts in any service (ServerScriptService, ReplicatedStorage, StarterPlayerScripts, etc.)
+- Automatically creates intermediate folders for nested paths
+- Updates existing scripts with new source code
+
+**Example:**
+```
+write_script({
+  path: "ServerScriptService.GameManager",
+  source: "print('Hello from AI!')"
+})
+```
+
+**Status:** [PR #52](https://github.com/Roblox/studio-rust-mcp-server/pull/52) submitted to upstream
+
+---
+
+## Upstream Tools
+
+This fork includes all tools from the official repository:
+
+- **`run_code`** - Execute Luau code in Studio and capture output
+- **`insert_model`** - Insert models from the Roblox marketplace
+
+---
+
+## Installation
+
+### Build from source (recommended for this fork)
+
+1. Ensure you have [Roblox Studio](https://create.roblox.com/docs/en-us/studio/setup) and [Claude Desktop](https://claude.ai/download) or [Claude Code](https://claude.ai/code) installed.
+2. Exit Claude and Roblox Studio if running.
+3. [Install Rust](https://www.rust-lang.org/tools/install).
+4. Clone this repository:
+   ```sh
+   git clone https://github.com/kevinswint/roblox-studio-rust-mcp-server.git
+   cd roblox-studio-rust-mcp-server
+   ```
+5. Build and install:
+   ```sh
+   cargo run
+   ```
+
+This builds the MCP server, installs the Studio plugin, and configures Claude.
+
+### Verify setup
+
+1. Open Roblox Studio and check the **Plugins** tab for the MCP plugin
+2. In Claude, verify tools are available: `run_code`, `insert_model`, and `write_script`
+
+---
+
+## Keeping in Sync with Upstream
+
+This fork stays up-to-date with the official repository:
+
+```sh
+git fetch upstream
+git merge upstream/main
+```
+
+---
+
+## Contributing
+
+Contributions welcome! If you have improvements:
+
+1. Consider submitting PRs to [upstream](https://github.com/Roblox/studio-rust-mcp-server) first
+2. If upstream is unresponsive, PRs to this fork are welcome
+
+---
+
+## Original README
+
+*The following is from the original Roblox repository:*
+
+---
+
 # Roblox Studio MCP Server
 
 This repository contains a reference implementation of the Model Context Protocol (MCP) that enables
