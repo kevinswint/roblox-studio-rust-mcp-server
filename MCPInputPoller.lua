@@ -1,14 +1,23 @@
 --[[
 	MCP Input Simulation Scripts
 
-	Input simulation requires TWO scripts because:
+	Input simulation requires scripts in your game because:
 	- HTTP requests can only be made from ServerScripts
 	- Input execution must happen on the client
+	- Game systems need to listen to MCPInputReceived events
 
 	INSTALLATION:
 	1. Enable HttpService: Game Settings > Security > Allow HTTP Requests
 	2. Copy MCPInputPoller to ServerScriptService
 	3. Copy MCPInputHandler to StarterPlayerScripts
+	4. (Optional) Copy MCPMovementController for WASD movement
+	5. (Optional) Add ability integration to your ability scripts
+
+	HOW IT WORKS:
+	1. MCP tools (simulate_input, click_gui) queue commands to /mcp/input endpoint
+	2. MCPInputPoller (server) polls the endpoint and sends commands to clients
+	3. MCPInputHandler (client) receives commands and fires MCPInputReceived event
+	4. Your game scripts listen to MCPInputReceived to respond to simulated input
 ]]
 
 --============================================================================
@@ -30,7 +39,7 @@ if not inputEvent then
 end
 
 local function processCommand(command)
-	print("[MCPPoller] VERIFIED RECEIVED:", command.command_type)
+	print("[MCPPoller] Received:", command.command_type)
 	for _, player in Players:GetPlayers() do
 		inputEvent:FireClient(player, command)
 	end
@@ -175,4 +184,187 @@ if inputCommand then
 	end)
 	print("[MCPInput] Client handler ready!")
 end
+]]
+
+--============================================================================
+-- SCRIPT 3: MCPMovementController (LocalScript in StarterPlayerScripts)
+-- Enables WASD movement and jumping via MCP input simulation
+--============================================================================
+--[[
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Player = Players.LocalPlayer
+
+-- Track which movement keys are pressed
+local MovementKeys = {
+	[Enum.KeyCode.W] = false,
+	[Enum.KeyCode.A] = false,
+	[Enum.KeyCode.S] = false,
+	[Enum.KeyCode.D] = false,
+	[Enum.KeyCode.Space] = false,
+}
+
+-- Get or create MCPInputReceived event
+local MCPInputReceived = ReplicatedStorage:FindFirstChild("MCPInputReceived")
+if not MCPInputReceived then
+	MCPInputReceived = Instance.new("BindableEvent")
+	MCPInputReceived.Name = "MCPInputReceived"
+	MCPInputReceived.Parent = ReplicatedStorage
+end
+
+-- Handle MCP input
+MCPInputReceived.Event:Connect(function(inputData)
+	local keyCode = inputData.KeyCode
+
+	if MovementKeys[keyCode] ~= nil then
+		if inputData.UserInputState == Enum.UserInputState.Begin then
+			MovementKeys[keyCode] = true
+
+			-- Handle jump immediately
+			if keyCode == Enum.KeyCode.Space then
+				local character = Player.Character
+				if character then
+					local humanoid = character:FindFirstChild("Humanoid")
+					if humanoid then
+						humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+					end
+				end
+			end
+		elseif inputData.UserInputState == Enum.UserInputState.End then
+			MovementKeys[keyCode] = false
+		end
+	end
+end)
+
+-- Calculate movement direction from pressed keys
+local function getMovementDirection()
+	local direction = Vector3.zero
+
+	if MovementKeys[Enum.KeyCode.W] then
+		direction = direction + Vector3.new(0, 0, -1)
+	end
+	if MovementKeys[Enum.KeyCode.S] then
+		direction = direction + Vector3.new(0, 0, 1)
+	end
+	if MovementKeys[Enum.KeyCode.A] then
+		direction = direction + Vector3.new(-1, 0, 0)
+	end
+	if MovementKeys[Enum.KeyCode.D] then
+		direction = direction + Vector3.new(1, 0, 0)
+	end
+
+	if direction.Magnitude > 0 then
+		direction = direction.Unit
+	end
+
+	return direction
+end
+
+-- Apply movement each frame
+RunService.Heartbeat:Connect(function()
+	local character = Player.Character
+	if not character then return end
+
+	local humanoid = character:FindFirstChild("Humanoid")
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not rootPart then return end
+
+	local moveDir = getMovementDirection()
+
+	if moveDir.Magnitude > 0 then
+		-- Convert local direction to world direction based on camera
+		local camera = workspace.CurrentCamera
+		if camera then
+			local cameraDirection = camera.CFrame:VectorToWorldSpace(moveDir)
+			cameraDirection = Vector3.new(cameraDirection.X, 0, cameraDirection.Z)
+			if cameraDirection.Magnitude > 0 then
+				humanoid:Move(cameraDirection.Unit, false)
+			end
+		else
+			humanoid:Move(moveDir, false)
+		end
+	end
+end)
+
+print("[MCPMovementController] WASD + Space enabled via MCP input")
+]]
+
+--============================================================================
+-- SCRIPT 4: Ability Integration Example
+-- Add this pattern to your existing ability scripts to support MCP input
+--============================================================================
+--[[
+-- Example: Add to bottom of your AbilityController or similar script
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Your existing ability key mappings (adjust to match your game)
+local AbilityKeys = {
+	[Enum.KeyCode.Q] = "Ability1",
+	[Enum.KeyCode.E] = "Ability2",
+	[Enum.KeyCode.R] = "Ability3",
+	[Enum.KeyCode.F] = "Ability4",
+}
+
+-- Your existing ability handlers (these should already exist in your code)
+local AbilityHandlers = {
+	Ability1 = function() --[[ your ability code ]] end,
+	Ability2 = function() --[[ your ability code ]] end,
+	Ability3 = function() --[[ your ability code ]] end,
+	Ability4 = function() --[[ your ability code ]] end,
+}
+
+-- MCP Input Integration - Add this section
+local MCPInputReceived = ReplicatedStorage:FindFirstChild("MCPInputReceived")
+if not MCPInputReceived then
+	MCPInputReceived = Instance.new("BindableEvent")
+	MCPInputReceived.Name = "MCPInputReceived"
+	MCPInputReceived.Parent = ReplicatedStorage
+end
+
+MCPInputReceived.Event:Connect(function(inputData)
+	if inputData.UserInputState == Enum.UserInputState.Begin then
+		local abilityName = AbilityKeys[inputData.KeyCode]
+		if abilityName then
+			-- Add cooldown check here if your game uses cooldowns
+			local handler = AbilityHandlers[abilityName]
+			if handler then
+				print("[AbilityController] MCP triggered:", abilityName)
+				handler()
+			end
+		end
+	end
+end)
+
+print("[AbilityController] MCP input integration enabled!")
+]]
+
+--============================================================================
+-- USAGE EXAMPLES
+--============================================================================
+--[[
+After installing these scripts, you can use MCP tools to control your game:
+
+-- Dismiss a welcome screen
+click_gui({ path = "ScreenGui.WelcomeFrame.PlayButton" })
+
+-- Move forward for 2 seconds
+simulate_input({ input_type = "keyboard", key = "W", action = "begin" })
+-- wait 2 seconds...
+simulate_input({ input_type = "keyboard", key = "W", action = "end" })
+
+-- Tap an ability key
+simulate_input({ input_type = "keyboard", key = "E", action = "tap" })
+
+-- Jump
+simulate_input({ input_type = "keyboard", key = "Space", action = "tap" })
+
+-- Strafe right while moving forward
+simulate_input({ input_type = "keyboard", key = "W", action = "begin" })
+simulate_input({ input_type = "keyboard", key = "D", action = "begin" })
+-- wait...
+simulate_input({ input_type = "keyboard", key = "W", action = "end" })
+simulate_input({ input_type = "keyboard", key = "D", action = "end" })
 ]]
