@@ -175,21 +175,30 @@ Input simulation (`simulate_input`, `click_gui`) uses HTTP polling because:
 - Input must be executed on the client
 - Roblox's DataModel isolation prevents direct communication during playtest
 
-**Installation:**
+**Required Scripts:**
 
 1. Enable HttpService: Game Settings > Security > Allow HTTP Requests
 
 2. Add **MCPInputPoller** (Script) to `ServerScriptService`:
-   ```lua
-   -- Polls localhost:44755/mcp/input and relays commands to clients
-   ```
+   - Polls `localhost:44755/mcp/input` for commands
+   - Relays commands to clients via RemoteEvent
 
 3. Add **MCPInputHandler** (LocalScript) to `StarterPlayerScripts`:
-   ```lua
-   -- Receives commands and executes input/GUI clicks
-   ```
+   - Receives commands from server
+   - Fires `MCPInputReceived` BindableEvent for game scripts
 
-See `MCPInputPoller.lua` in this repository for complete script code.
+**Optional Scripts (for full automation):**
+
+4. Add **MCPMovementController** (LocalScript) to `StarterPlayerScripts`:
+   - Enables WASD movement via MCP input
+   - Enables Space to jump
+   - Listens to `MCPInputReceived` and controls Humanoid
+
+5. Add **Ability Integration** to your existing ability scripts:
+   - Listen to `MCPInputReceived` for ability keys (Q, E, R, F, etc.)
+   - Trigger abilities when MCP input is received
+
+See `MCPInputPoller.lua` in this repository for complete script code and examples.
 
 **Verification:**
 - Check output for `[MCPPoller] Starting poll loop`
