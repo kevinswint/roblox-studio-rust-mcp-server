@@ -393,15 +393,35 @@ impl RBXStudioServer {
             timestamp: current_timestamp_ms(),
         };
 
-        {
-            let mut state = self.state.lock().await;
-            state.input_command_queue.push_back(command.clone());
-        }
+        // POST to the HTTP server to ensure command reaches the right instance
+        // (handles proxy mode where this instance may not have the HTTP server)
+        let client = reqwest::Client::new();
+        let result = client
+            .post(format!("http://127.0.0.1:{STUDIO_PLUGIN_PORT}/mcp/input"))
+            .json(&serde_json::json!({ "command": command }))
+            .send()
+            .await;
 
-        Ok(CallToolResult::success(vec![Content::text(format!(
-            "Queued {} input: {} {} (id: {}). Game must poll /mcp/input to receive.",
-            args.input_type, args.key, args.action, command.id
-        ))]))
+        match result {
+            Ok(response) if response.status().is_success() => {
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Queued {} input: {} {} (id: {}). Game must poll /mcp/input to receive.",
+                    args.input_type, args.key, args.action, command.id
+                ))]))
+            }
+            Ok(response) => {
+                Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Failed to queue input command: HTTP {} - Is Roblox Studio running?",
+                    response.status()
+                ))]))
+            }
+            Err(e) => {
+                Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Failed to queue input command: {} - Is the MCP server running?",
+                    e
+                ))]))
+            }
+        }
     }
 
     #[tool(
@@ -420,15 +440,35 @@ impl RBXStudioServer {
             timestamp: current_timestamp_ms(),
         };
 
-        {
-            let mut state = self.state.lock().await;
-            state.input_command_queue.push_back(command.clone());
-        }
+        // POST to the HTTP server to ensure command reaches the right instance
+        // (handles proxy mode where this instance may not have the HTTP server)
+        let client = reqwest::Client::new();
+        let result = client
+            .post(format!("http://127.0.0.1:{STUDIO_PLUGIN_PORT}/mcp/input"))
+            .json(&serde_json::json!({ "command": command }))
+            .send()
+            .await;
 
-        Ok(CallToolResult::success(vec![Content::text(format!(
-            "Queued GUI click: {} (id: {}). Game must poll /mcp/input to receive.",
-            args.path, command.id
-        ))]))
+        match result {
+            Ok(response) if response.status().is_success() => {
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Queued GUI click: {} (id: {}). Game must poll /mcp/input to receive.",
+                    args.path, command.id
+                ))]))
+            }
+            Ok(response) => {
+                Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Failed to queue GUI click: HTTP {} - Is Roblox Studio running?",
+                    response.status()
+                ))]))
+            }
+            Err(e) => {
+                Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Failed to queue GUI click: {} - Is the MCP server running?",
+                    e
+                ))]))
+            }
+        }
     }
 
     async fn generic_tool_run(
@@ -765,6 +805,12 @@ pub struct InputPollResponse {
     pub count: usize,
 }
 
+/// Request to add an input command (used by proxy instances)
+#[derive(Debug, Deserialize)]
+pub struct InputCommandRequest {
+    pub command: InputCommand,
+}
+
 /// Handler for GET /mcp/input - Game polls this to get pending input commands
 pub async fn get_input_commands_handler(
     State(state): State<PackedState>,
@@ -773,6 +819,16 @@ pub async fn get_input_commands_handler(
     let commands: Vec<InputCommand> = state.input_command_queue.drain(..).collect();
     let count = commands.len();
     Json(InputPollResponse { commands, count })
+}
+
+/// Handler for POST /mcp/input - MCP tools post commands here (supports proxy mode)
+pub async fn post_input_command_handler(
+    State(state): State<PackedState>,
+    Json(request): Json<InputCommandRequest>,
+) -> impl IntoResponse {
+    let mut state = state.lock().await;
+    state.input_command_queue.push_back(request.command);
+    (StatusCode::OK, "OK")
 }
 
 /// Helper to get current timestamp in milliseconds
