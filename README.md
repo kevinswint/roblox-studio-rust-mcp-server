@@ -113,6 +113,91 @@ Stops playtest/simulation and returns to edit mode.
 
 ---
 
+### `simulate_input`
+
+Simulates keyboard or mouse input during playtest via HTTP polling.
+
+**Why this matters:** Enables automated testing of gameplay that requires player input. Commands are queued and polled by the game.
+
+**Parameters:**
+- `input_type` - `"keyboard"` or `"mouse"`
+- `key` - Key name (`"W"`, `"Space"`, `"E"`) or mouse button (`"Left"`, `"Right"`)
+- `action` - `"begin"`, `"end"`, or `"tap"`
+- `mouse_x`, `mouse_y` (optional) - Mouse position for mouse input
+
+**Supported Keys:** A-Z, Space, Return, Tab, Escape, LeftShift, LeftControl, Arrow keys, F1-F12
+
+**Example:**
+```
+simulate_input({ input_type: "keyboard", key: "E", action: "tap" })
+```
+
+**Requires:** Game must include MCPInputPoller scripts (see below)
+
+---
+
+### `click_gui`
+
+Simulates clicking a GUI element during playtest via HTTP polling.
+
+**Parameters:**
+- `path` - Path to GUI element (e.g., `"FluxUI.WelcomeMessage.PlayButton"`)
+
+**Example:**
+```
+click_gui({ path: "ScreenGui.PlayButton" })
+```
+
+**Requires:** Game must include MCPInputPoller scripts (see below)
+
+---
+
+### `move_character`
+
+Moves or teleports a character in the workspace.
+
+**Parameters:**
+- `x`, `y`, `z` - Target world coordinates
+- `instant` (optional) - `true` for teleport, `false` for walk
+- `character_name` (optional) - Specific character to move
+
+**Example:**
+```
+move_character({ x: 0, y: 5, z: 10, instant: true, character_name: "Aria" })
+```
+
+---
+
+## Input Simulation Setup
+
+Input simulation (`simulate_input`, `click_gui`) uses HTTP polling because:
+- HTTP requests can only be made from ServerScripts
+- Input must be executed on the client
+- Roblox's DataModel isolation prevents direct communication during playtest
+
+**Installation:**
+
+1. Enable HttpService: Game Settings > Security > Allow HTTP Requests
+
+2. Add **MCPInputPoller** (Script) to `ServerScriptService`:
+   ```lua
+   -- Polls localhost:44755/mcp/input and relays commands to clients
+   ```
+
+3. Add **MCPInputHandler** (LocalScript) to `StarterPlayerScripts`:
+   ```lua
+   -- Receives commands and executes input/GUI clicks
+   ```
+
+See `MCPInputPoller.lua` in this repository for complete script code.
+
+**Verification:**
+- Check output for `[MCPPoller] Server started`
+- Check output for `[MCPInput] Client handler ready!`
+- Send `simulate_input` and verify `[MCPPoller] VERIFIED RECEIVED`
+
+---
+
 ## Upstream Tools
 
 This fork includes all tools from the official repository:
