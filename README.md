@@ -192,9 +192,9 @@ Input simulation (`simulate_input`, `click_gui`) uses HTTP polling because:
 See `MCPInputPoller.lua` in this repository for complete script code.
 
 **Verification:**
-- Check output for `[MCPPoller] Server started`
+- Check output for `[MCPPoller] Starting poll loop`
 - Check output for `[MCPInput] Client handler ready!`
-- Send `simulate_input` and verify `[MCPPoller] VERIFIED RECEIVED`
+- Send `simulate_input` and verify `[MCPPoller] Got 1 commands!`
 
 ---
 
