@@ -1,7 +1,10 @@
 use axum::routing::{get, post};
 use clap::Parser;
 use color_eyre::eyre::Result;
-use rbx_studio_server::*;
+use rbx_studio_server::{
+    dud_proxy_loop, get_input_commands_handler, proxy_handler, request_handler, response_handler,
+    AppState, RBXStudioServer, STUDIO_PLUGIN_PORT,
+};
 use rmcp::ServiceExt;
 use std::io;
 use std::net::Ipv4Addr;
@@ -52,6 +55,7 @@ async fn main() -> Result<()> {
             .route("/request", get(request_handler))
             .route("/response", post(response_handler))
             .route("/proxy", post(proxy_handler))
+            .route("/mcp/input", get(get_input_commands_handler))
             .with_state(server_state_clone);
         tracing::info!("This MCP instance is HTTP server listening on {STUDIO_PLUGIN_PORT}");
         tokio::spawn(async {

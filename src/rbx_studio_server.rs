@@ -40,11 +40,22 @@ pub struct RunCommandResponse {
     id: Uuid,
 }
 
+/// Command for input simulation - queued by MCP tools, polled by game
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct InputCommand {
+    pub command_type: String,  // "keyboard", "mouse", "gui_click"
+    pub data: serde_json::Value,
+    pub id: Uuid,
+    pub timestamp: u64,
+}
+
 pub struct AppState {
     process_queue: VecDeque<ToolArguments>,
     output_map: HashMap<Uuid, mpsc::UnboundedSender<Result<String>>>,
     waiter: watch::Receiver<()>,
     trigger: watch::Sender<()>,
+    /// Queue of input commands for game to poll
+    pub input_command_queue: VecDeque<InputCommand>,
 }
 pub type PackedState = Arc<Mutex<AppState>>;
 
@@ -56,6 +67,7 @@ impl AppState {
             output_map: HashMap::new(),
             waiter,
             trigger,
+            input_command_queue: VecDeque::new(),
         }
     }
 }
@@ -219,8 +231,8 @@ enum ToolArgumentValues {
     StopSimulation(StopSimulation),
     StopPlaytest(StopPlaytest),
     MoveCharacter(MoveCharacter),
-    SimulateInput(SimulateInput),
-    ClickGui(ClickGui),
+    // Note: SimulateInput and ClickGui are handled directly by Rust (HTTP polling)
+    // and don't go through the Luau plugin
 }
 #[tool_router]
 impl RBXStudioServer {
@@ -362,25 +374,61 @@ impl RBXStudioServer {
     }
 
     #[tool(
-        description = "Simulates input by firing a BindableEvent that game scripts can listen to. Creates 'MCPInputEvent' in ReplicatedStorage. Games should connect to this event to handle simulated input for testing. This is the recommended way to test input-driven gameplay."
+        description = "Simulates keyboard or mouse input during playtest. The game must include an MCPInputPoller LocalScript that polls http://localhost:44755/mcp/input to receive commands. Supports keyboard keys (W, A, S, D, Space, E, etc.) and mouse buttons (Left, Right, Middle)."
     )]
     async fn simulate_input(
         &self,
         Parameters(args): Parameters<SimulateInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.generic_tool_run(ToolArgumentValues::SimulateInput(args))
-            .await
+        let command = InputCommand {
+            command_type: "input".to_string(),
+            data: serde_json::json!({
+                "inputType": args.input_type,
+                "key": args.key,
+                "action": args.action,
+                "mouseX": args.mouse_x,
+                "mouseY": args.mouse_y,
+            }),
+            id: Uuid::new_v4(),
+            timestamp: current_timestamp_ms(),
+        };
+
+        {
+            let mut state = self.state.lock().await;
+            state.input_command_queue.push_back(command.clone());
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Queued {} input: {} {} (id: {}). Game must poll /mcp/input to receive.",
+            args.input_type, args.key, args.action, command.id
+        ))]))
     }
 
     #[tool(
-        description = "Programmatically clicks/activates a GUI element by path. Fires the Activated event on buttons. The path should point to a GuiButton (TextButton, ImageButton) or similar clickable element."
+        description = "Simulates clicking a GUI element during playtest. The game must include an MCPInputPoller LocalScript that polls http://localhost:44755/mcp/input to receive commands. Provide the path to the GUI element (e.g., 'ScreenGui.PlayButton')."
     )]
     async fn click_gui(
         &self,
         Parameters(args): Parameters<ClickGui>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.generic_tool_run(ToolArgumentValues::ClickGui(args))
-            .await
+        let command = InputCommand {
+            command_type: "gui_click".to_string(),
+            data: serde_json::json!({
+                "path": args.path,
+            }),
+            id: Uuid::new_v4(),
+            timestamp: current_timestamp_ms(),
+        };
+
+        {
+            let mut state = self.state.lock().await;
+            state.input_command_queue.push_back(command.clone());
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Queued GUI click: {} (id: {}). Game must poll /mcp/input to receive.",
+            args.path, command.id
+        ))]))
     }
 
     async fn generic_tool_run(
@@ -708,4 +756,30 @@ pub async fn dud_proxy_loop(state: PackedState, exit: Receiver<()>) {
             waiter.changed().await.unwrap();
         }
     }
+}
+
+/// Response for input polling endpoint
+#[derive(Debug, Serialize)]
+pub struct InputPollResponse {
+    pub commands: Vec<InputCommand>,
+    pub count: usize,
+}
+
+/// Handler for GET /mcp/input - Game polls this to get pending input commands
+pub async fn get_input_commands_handler(
+    State(state): State<PackedState>,
+) -> impl IntoResponse {
+    let mut state = state.lock().await;
+    let commands: Vec<InputCommand> = state.input_command_queue.drain(..).collect();
+    let count = commands.len();
+    Json(InputPollResponse { commands, count })
+}
+
+/// Helper to get current timestamp in milliseconds
+fn current_timestamp_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
