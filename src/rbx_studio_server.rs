@@ -24,7 +24,8 @@ pub const STUDIO_PLUGIN_PORT: u16 = 44755;
 const LONG_POLL_DURATION: Duration = Duration::from_secs(15);
 
 // Screenshot configuration
-const SCREENSHOT_MAX_DIMENSION: u32 = 4096;
+// Max 1920px to stay under API's 2000px limit for multi-image requests
+const SCREENSHOT_MAX_DIMENSION: u32 = 1920;
 const SCREENSHOT_JPEG_QUALITY: u8 = 85;
 const SCREENSHOT_TIMEOUT_SECS: u64 = 10;
 
