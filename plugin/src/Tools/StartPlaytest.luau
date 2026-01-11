@@ -11,18 +11,13 @@ pcall(function()
 end)
 
 local function startPlaytest(): string
-	if RunService:IsRunning() then
-		error("Studio is already in play/run mode. Stop simulation first.")
-	end
-
-	-- Track if playtest started successfully
-	local startError: string? = nil
-	local playtestStarted = false
+	-- Note: RunService:IsRunning() returns false from plugin context even during playtest
+	-- because plugin runs in separate DataModel. We can't reliably check current state.
 
 	-- Try StudioTestService first (starts with player character)
 	if StudioTestService then
 		-- Use task.defer to schedule after current execution cycle
-		-- This should allow the HTTP response to complete before yielding
+		-- This allows the HTTP response to complete before the yielding call
 		task.defer(function()
 			local success, err = pcall(function()
 				-- Pass empty table instead of nil to avoid potential argument issues
@@ -33,47 +28,35 @@ local function startPlaytest(): string
 			end
 		end)
 
-		-- Wait briefly to see if playtest starts
-		task.wait(0.3)
+		-- Give a moment for the deferred call to be scheduled
+		task.wait(0.05)
 
-		-- Check if we're now running
-		if RunService:IsRunning() then
-			playtestStarted = true
-		else
-			startError = "ExecutePlayModeAsync did not start playtest (may yield in deferred context)"
-		end
-	else
-		startError = "StudioTestService not available"
+		-- We can't verify if playtest started because IsRunning() returns false
+		-- from plugin context. Trust that the call was made successfully.
+		return HttpService:JSONEncode({
+			success = true,
+			mode = "playtest",
+			note = "Started playtest mode (F5) via StudioTestService. Note: State cannot be verified from plugin context.",
+			hasPlayer = true,
+		})
 	end
 
-	-- If StudioTestService failed, fall back to RunService:Run() (simulation mode)
-	if not playtestStarted then
-		local success, err = pcall(function()
-			RunService:Run()
-		end)
+	-- Fallback: StudioTestService not available, use RunService:Run() (simulation mode)
+	local success, err = pcall(function()
+		RunService:Run()
+	end)
 
-		if success then
-			-- Note: RunService:IsRunning() may return false from plugin context
-			-- even when simulation is actually running. Trust the pcall success.
-			task.wait(0.1)
-			return HttpService:JSONEncode({
-				success = true,
-				mode = "simulation",
-				note = "Started simulation mode (F8) instead of playtest. StudioTestService issue: " .. (startError or "unknown"),
-				hasPlayer = false,
-				warning = "RunService:Run() called successfully. If simulation didn't start, try pressing F8 manually.",
-			})
-		end
-
-		error("Failed to start any mode. StudioTestService: " .. (startError or "N/A") .. ". RunService: " .. tostring(err))
+	if success then
+		task.wait(0.1)
+		return HttpService:JSONEncode({
+			success = true,
+			mode = "simulation",
+			note = "Started simulation mode (F8) - StudioTestService not available.",
+			hasPlayer = false,
+		})
 	end
 
-	return HttpService:JSONEncode({
-		success = true,
-		mode = "playtest",
-		note = "Started playtest mode (F5) with player character via StudioTestService.",
-		hasPlayer = true,
-	})
+	error("Failed to start playtest. StudioTestService not available. RunService:Run() failed: " .. tostring(err))
 end
 
 local function handleStartPlaytest(args: Types.ToolArgs): string?
