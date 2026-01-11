@@ -44,7 +44,7 @@ Captures a screenshot of the Roblox Studio window and returns it as a JPEG image
 **Features:**
 - Captures the Studio window directly (no plugin communication needed)
 - Supports macOS and Windows
-- Returns high-quality JPEG (up to 4096px, quality 85)
+- Returns high-quality JPEG (up to 1920px, quality 85)
 - Requires Screen Recording permission on macOS
 
 **Example:**
