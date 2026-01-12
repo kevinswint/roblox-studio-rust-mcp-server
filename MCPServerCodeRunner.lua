@@ -7,25 +7,40 @@
 
 	SETUP:
 	1. Copy this script into ServerScriptService in your Roblox game
-	2. The script will automatically poll the MCP server for code to execute
-	3. Use the run_server_code MCP tool to execute code
+	2. Enable HttpService: Game Settings > Security > Allow HTTP Requests
+	3. The script will automatically poll the MCP server for code to execute
+	4. Use the run_server_code MCP tool to execute code
+
+	BUILT-IN COMMANDS (work without loadstring):
+	- "STOP" - Stops the playtest (calls StudioTestService:EndTest)
+	- "PING" - Returns "pong" to verify the script is running
+	- "PLAYERS" - Returns list of current players
+
+	ARBITRARY CODE EXECUTION (requires LoadStringEnabled):
+	If you need to run arbitrary Luau code, you must enable loadstring:
+	1. In Explorer, click ServerScriptService
+	2. In Properties panel, find "LoadStringEnabled"
+	3. Check the checkbox to enable it
+	Note: This makes the game more vulnerable to exploits (only use in development)
 
 	SECURITY NOTE:
-	This script executes arbitrary code. It should ONLY be used during local development
-	and testing. Do NOT include this in published games.
+	This script should ONLY be used during local development and testing.
+	Do NOT include this in published games.
 
 	EXAMPLE USAGE (from Claude/MCP):
-	run_server_code({ code = "return _G.PlayerDataStore" })
-	run_server_code({ code = "return game.Players:GetPlayers()" })
-	run_server_code({ code = "print('Hello from server!'); return 'done'" })
+	run_server_code({ code = "STOP" })  -- Built-in: stops playtest
+	run_server_code({ code = "PING" })  -- Built-in: returns "pong"
+	run_server_code({ code = "PLAYERS" })  -- Built-in: lists players
+	run_server_code({ code = "return _G.GameState" })  -- Requires LoadStringEnabled
 ]]
 
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 
 -- Configuration
 local MCP_SERVER_URL = "http://localhost:44755"
-local POLL_INTERVAL = 0.1 -- Poll every 100ms for responsive testing
+local POLL_INTERVAL = 0.5 -- Poll every 500ms (avoid rate limiting)
 local DEBUG_MODE = true -- Set to false to reduce output
 
 local function log(...)
@@ -37,6 +52,46 @@ end
 local function warn_log(...)
 	warn("[MCPServerCodeRunner]", ...)
 end
+
+-- Check if loadstring is available
+local loadstringEnabled = false
+pcall(function()
+	local test = loadstring("return true")
+	if test and test() then
+		loadstringEnabled = true
+	end
+end)
+
+-- Built-in commands that work without loadstring
+local builtInCommands = {
+	["STOP"] = function()
+		local StudioTestService = game:GetService("StudioTestService")
+		StudioTestService:EndTest("Stopped via MCP")
+		return true, "Playtest stopped"
+	end,
+
+	["PING"] = function()
+		return true, "pong"
+	end,
+
+	["PLAYERS"] = function()
+		local count = #Players:GetPlayers()
+		local names = {}
+		for _, p in Players:GetPlayers() do
+			table.insert(names, p.Name)
+		end
+		return true, "Players: " .. count .. " - " .. table.concat(names, ", ")
+	end,
+
+	["STATE"] = function()
+		return true, HttpService:JSONEncode({
+			isServer = RunService:IsServer(),
+			isRunning = RunService:IsRunning(),
+			loadstringEnabled = loadstringEnabled,
+			playerCount = #Players:GetPlayers(),
+		})
+	end,
+}
 
 -- Poll for pending server code commands
 local function pollForCode()
@@ -55,6 +110,17 @@ end
 
 -- Execute code and return result
 local function executeCode(code: string): (boolean, string?)
+	-- Check for built-in commands first (case-insensitive)
+	local upperCode = string.upper(string.match(code, "^%s*(.-)%s*$") or "")
+	if builtInCommands[upperCode] then
+		return builtInCommands[upperCode]()
+	end
+
+	-- Try loadstring for arbitrary code
+	if not loadstringEnabled then
+		return false, "loadstring not enabled. Use built-in commands (STOP, PING, PLAYERS, STATE) or enable LoadStringEnabled in ServerScriptService Properties panel."
+	end
+
 	-- Wrap code to capture return value
 	local wrappedCode = [[
 		local __result = (function()
@@ -151,6 +217,8 @@ end
 local function startPolling()
 	log("Started - polling", MCP_SERVER_URL, "for server code commands")
 	log("Server context: RunService:IsServer() =", RunService:IsServer())
+	log("loadstring enabled:", loadstringEnabled)
+	log("Built-in commands: STOP, PING, PLAYERS, STATE")
 
 	while true do
 		local commands = pollForCode()
