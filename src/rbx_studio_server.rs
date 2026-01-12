@@ -17,7 +17,7 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{mpsc, watch, Mutex};
-use tokio::time::Duration;
+use tokio::time::{timeout, Duration};
 use uuid::Uuid;
 
 pub const STUDIO_PLUGIN_PORT: u16 = 44755;
@@ -28,6 +28,8 @@ const LONG_POLL_DURATION: Duration = Duration::from_secs(15);
 const SCREENSHOT_MAX_DIMENSION: u32 = 1920;
 const SCREENSHOT_JPEG_QUALITY: u8 = 85;
 const SCREENSHOT_TIMEOUT_SECS: u64 = 10;
+// Tool execution timeout - must be longer than Lua-side verification timeout (10s)
+const TOOL_EXECUTION_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ToolArguments {
@@ -488,10 +490,33 @@ impl RBXStudioServer {
         trigger
             .send(())
             .map_err(|e| ErrorData::internal_error(format!("Unable to trigger send {e}"), None))?;
-        let result = rx
-            .recv()
-            .await
-            .ok_or(ErrorData::internal_error("Couldn't receive response", None))?;
+
+        // Wait for response with timeout to prevent hanging indefinitely
+        let result = match timeout(TOOL_EXECUTION_TIMEOUT, rx.recv()).await {
+            Ok(Some(result)) => result,
+            Ok(None) => {
+                // Channel closed without response
+                let mut state = self.state.lock().await;
+                state.output_map.remove_entry(&id);
+                return Err(ErrorData::internal_error(
+                    "Plugin channel closed without response",
+                    None,
+                ));
+            }
+            Err(_) => {
+                // Timeout elapsed
+                let mut state = self.state.lock().await;
+                state.output_map.remove_entry(&id);
+                return Err(ErrorData::internal_error(
+                    format!(
+                        "Tool execution timed out after {}s. The plugin may be unresponsive or Studio is in an unexpected state.",
+                        TOOL_EXECUTION_TIMEOUT.as_secs()
+                    ),
+                    None,
+                ));
+            }
+        };
+
         {
             let mut state = self.state.lock().await;
             state.output_map.remove_entry(&id);

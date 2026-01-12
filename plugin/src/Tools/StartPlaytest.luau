@@ -10,35 +10,72 @@ pcall(function()
 	StudioTestService = game:GetService("StudioTestService")
 end)
 
+-- Configuration
+local VERIFICATION_TIMEOUT = 10 -- seconds to wait for state change
+local POLL_INTERVAL = 0.1 -- seconds between state checks
+
+-- Wait for RunService state to change with timeout
+local function waitForState(targetRunning: boolean, timeout: number): (boolean, string?)
+	local startTime = os.clock()
+
+	while os.clock() - startTime < timeout do
+		local isRunning = RunService:IsRunning()
+		if isRunning == targetRunning then
+			return true, nil
+		end
+		task.wait(POLL_INTERVAL)
+	end
+
+	return false, string.format(
+		"Timeout after %.1fs waiting for state change (expected IsRunning=%s, got %s)",
+		timeout, tostring(targetRunning), tostring(RunService:IsRunning())
+	)
+end
+
 local function startPlaytest(): string
-	-- Note: RunService:IsRunning() returns false from plugin context even during playtest
-	-- because plugin runs in separate DataModel. We can't reliably check current state.
+	-- Check if already in playtest/simulation mode
+	if RunService:IsRunning() then
+		return HttpService:JSONEncode({
+			success = false,
+			error = "Studio is already running. Call stop_playtest first.",
+			currentMode = RunService:IsRunMode() and "simulation" or "playtest",
+		})
+	end
 
 	-- Try StudioTestService first (starts with player character)
 	if StudioTestService then
-		-- Use task.defer to schedule after current execution cycle
-		-- This allows the HTTP response to complete before the yielding call
-		task.defer(function()
-			local success, err = pcall(function()
-				-- Pass empty table instead of nil to avoid potential argument issues
-				StudioTestService:ExecutePlayModeAsync({})
-			end)
-			if not success then
-				warn("[MCP] ExecutePlayModeAsync failed:", err)
-			end
+		local success, err = pcall(function()
+			-- ExecutePlayModeAsync is a yielding function - it waits until playtest starts
+			StudioTestService:ExecutePlayModeAsync({})
 		end)
 
-		-- Give a moment for the deferred call to be scheduled
-		task.wait(0.05)
+		if not success then
+			return HttpService:JSONEncode({
+				success = false,
+				error = "ExecutePlayModeAsync failed: " .. tostring(err),
+				suggestion = "Try stopping any pending playtest operations first.",
+			})
+		end
 
-		-- We can't verify if playtest started because IsRunning() returns false
-		-- from plugin context. Trust that the call was made successfully.
-		return HttpService:JSONEncode({
-			success = true,
-			mode = "playtest",
-			note = "Started playtest mode (F5) via StudioTestService. Note: State cannot be verified from plugin context.",
-			hasPlayer = true,
-		})
+		-- Verify playtest actually started
+		local verified, verifyErr = waitForState(true, VERIFICATION_TIMEOUT)
+
+		if verified then
+			-- Additional check: verify it's playtest mode (not simulation)
+			local isPlaytest = RunService:IsRunning() and not RunService:IsRunMode()
+			return HttpService:JSONEncode({
+				success = true,
+				verified = true,
+				mode = isPlaytest and "playtest" or "simulation",
+				hasPlayer = isPlaytest,
+			})
+		else
+			return HttpService:JSONEncode({
+				success = false,
+				error = "Playtest started but verification failed: " .. tostring(verifyErr),
+				isRunning = RunService:IsRunning(),
+			})
+		end
 	end
 
 	-- Fallback: StudioTestService not available, use RunService:Run() (simulation mode)
@@ -46,17 +83,30 @@ local function startPlaytest(): string
 		RunService:Run()
 	end)
 
-	if success then
-		task.wait(0.1)
+	if not success then
+		return HttpService:JSONEncode({
+			success = false,
+			error = "RunService:Run() failed: " .. tostring(err),
+		})
+	end
+
+	-- Verify simulation started
+	local verified, verifyErr = waitForState(true, VERIFICATION_TIMEOUT)
+
+	if verified then
 		return HttpService:JSONEncode({
 			success = true,
+			verified = true,
 			mode = "simulation",
 			note = "Started simulation mode (F8) - StudioTestService not available.",
 			hasPlayer = false,
 		})
+	else
+		return HttpService:JSONEncode({
+			success = false,
+			error = "Simulation started but verification failed: " .. tostring(verifyErr),
+		})
 	end
-
-	error("Failed to start playtest. StudioTestService not available. RunService:Run() failed: " .. tostring(err))
 end
 
 local function handleStartPlaytest(args: Types.ToolArgs): string?
