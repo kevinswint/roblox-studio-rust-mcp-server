@@ -255,6 +255,34 @@ struct RunServerCode {
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
+struct InvokeRemote {
+    #[schemars(
+        description = "Path to RemoteFunction (e.g., 'ReplicatedStorage.Remotes.GetPlayerData')"
+    )]
+    path: String,
+    #[schemars(
+        description = "JSON array of arguments to pass to the RemoteFunction (e.g., '[\"player1\", 100]')"
+    )]
+    args: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
+struct FireRemote {
+    #[schemars(description = "Path to RemoteEvent (e.g., 'ReplicatedStorage.Remotes.PlayerAction')")]
+    path: String,
+    #[schemars(
+        description = "Direction: 'ToServer' (from client), 'ToClient' (to specific player), 'ToAllClients'"
+    )]
+    direction: String,
+    #[schemars(
+        description = "JSON array of arguments to pass to the RemoteEvent (e.g., '[\"action\", {\"data\": 1}]')"
+    )]
+    args: Option<String>,
+    #[schemars(description = "For 'ToClient' direction: player name to send to")]
+    player_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
 enum ToolArgumentValues {
     RunCode(RunCode),
     InsertModel(InsertModel),
@@ -573,6 +601,180 @@ impl RBXStudioServer {
                 result.error.unwrap_or_else(|| "Unknown error".to_string())
             ))]))
         }
+    }
+
+    /// Helper to run generated code on server and wait for result
+    async fn run_generated_server_code(&self, code: String) -> Result<CallToolResult, ErrorData> {
+        let command_id = Uuid::new_v4();
+        let command = ServerCodeCommand {
+            id: command_id,
+            code,
+            timestamp: current_timestamp_ms(),
+        };
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<ServerCodeResult>();
+
+        {
+            let mut state = self.state.lock().await;
+            state.server_code_queue.push_back(command);
+            state.server_code_results.insert(command_id, tx);
+        }
+
+        let result = match timeout(SERVER_CODE_TIMEOUT, rx.recv()).await {
+            Ok(Some(result)) => result,
+            Ok(None) => {
+                let mut state = self.state.lock().await;
+                state.server_code_results.remove(&command_id);
+                return Ok(CallToolResult::error(vec![Content::text(
+                    "Server execution channel closed. Is MCPServerCodeRunner running?",
+                )]));
+            }
+            Err(_) => {
+                let mut state = self.state.lock().await;
+                state.server_code_results.remove(&command_id);
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Timed out after {}s. Ensure playtest is running with MCPServerCodeRunner.",
+                    SERVER_CODE_TIMEOUT.as_secs()
+                ))]));
+            }
+        };
+
+        {
+            let mut state = self.state.lock().await;
+            state.server_code_results.remove(&command_id);
+        }
+
+        if result.success {
+            Ok(CallToolResult::success(vec![Content::text(
+                result.result.unwrap_or_else(|| "nil".to_string()),
+            )]))
+        } else {
+            Ok(CallToolResult::error(vec![Content::text(format!(
+                "Error: {}",
+                result.error.unwrap_or_else(|| "Unknown error".to_string())
+            ))]))
+        }
+    }
+
+    #[tool(
+        description = "Invokes a RemoteFunction on the server and returns the result. Requires MCPServerCodeRunner script in ServerScriptService. Use this to test server-side RemoteFunction handlers during playtest."
+    )]
+    async fn invoke_remote(
+        &self,
+        Parameters(args): Parameters<InvokeRemote>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let args_code = match &args.args {
+            Some(json_args) => format!(
+                "local HttpService = game:GetService('HttpService')\n\
+                local args = HttpService:JSONDecode('{}')\n\
+                return remote:InvokeServer(table.unpack(args))",
+                json_args.replace('\'', "\\'")
+            ),
+            None => "return remote:InvokeServer()".to_string(),
+        };
+
+        let code = format!(
+            r#"local path = "{}"
+local parts = string.split(path, ".")
+local current = game
+for _, part in ipairs(parts) do
+    current = current:FindFirstChild(part)
+    if not current then
+        error("Remote not found: " .. path .. " (failed at: " .. part .. ")")
+    end
+end
+local remote = current
+if not remote:IsA("RemoteFunction") then
+    error("Object at " .. path .. " is not a RemoteFunction, it's a " .. remote.ClassName)
+end
+{}"#,
+            args.path, args_code
+        );
+
+        self.run_generated_server_code(code).await
+    }
+
+    #[tool(
+        description = "Fires a RemoteEvent. Direction can be 'ToServer' (simulate client firing to server), 'ToClient' (server to specific player), or 'ToAllClients'. Requires MCPServerCodeRunner script."
+    )]
+    async fn fire_remote(
+        &self,
+        Parameters(args): Parameters<FireRemote>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let fire_code = match args.direction.as_str() {
+            "ToServer" => {
+                match &args.args {
+                    Some(json_args) => format!(
+                        "local HttpService = game:GetService('HttpService')\n\
+                        local args = HttpService:JSONDecode('{}')\n\
+                        remote:FireServer(table.unpack(args))\n\
+                        return 'Fired to server'",
+                        json_args.replace('\'', "\\'")
+                    ),
+                    None => "remote:FireServer()\nreturn 'Fired to server'".to_string(),
+                }
+            }
+            "ToClient" => {
+                let player_name = args.player_name.as_deref().unwrap_or("Unknown");
+                match &args.args {
+                    Some(json_args) => format!(
+                        "local HttpService = game:GetService('HttpService')\n\
+                        local Players = game:GetService('Players')\n\
+                        local player = Players:FindFirstChild('{}')\n\
+                        if not player then error('Player not found: {}') end\n\
+                        local args = HttpService:JSONDecode('{}')\n\
+                        remote:FireClient(player, table.unpack(args))\n\
+                        return 'Fired to client: {}'",
+                        player_name, player_name, json_args.replace('\'', "\\'"), player_name
+                    ),
+                    None => format!(
+                        "local Players = game:GetService('Players')\n\
+                        local player = Players:FindFirstChild('{}')\n\
+                        if not player then error('Player not found: {}') end\n\
+                        remote:FireClient(player)\n\
+                        return 'Fired to client: {}'",
+                        player_name, player_name, player_name
+                    ),
+                }
+            }
+            "ToAllClients" => {
+                match &args.args {
+                    Some(json_args) => format!(
+                        "local HttpService = game:GetService('HttpService')\n\
+                        local args = HttpService:JSONDecode('{}')\n\
+                        remote:FireAllClients(table.unpack(args))\n\
+                        return 'Fired to all clients'",
+                        json_args.replace('\'', "\\'")
+                    ),
+                    None => "remote:FireAllClients()\nreturn 'Fired to all clients'".to_string(),
+                }
+            }
+            _ => {
+                return Ok(CallToolResult::error(vec![Content::text(
+                    "Invalid direction. Use 'ToServer', 'ToClient', or 'ToAllClients'",
+                )]));
+            }
+        };
+
+        let code = format!(
+            r#"local path = "{}"
+local parts = string.split(path, ".")
+local current = game
+for _, part in ipairs(parts) do
+    current = current:FindFirstChild(part)
+    if not current then
+        error("Remote not found: " .. path .. " (failed at: " .. part .. ")")
+    end
+end
+local remote = current
+if not remote:IsA("RemoteEvent") then
+    error("Object at " .. path .. " is not a RemoteEvent, it's a " .. remote.ClassName)
+end
+{}"#,
+            args.path, fire_code
+        );
+
+        self.run_generated_server_code(code).await
     }
 
     async fn generic_tool_run(
