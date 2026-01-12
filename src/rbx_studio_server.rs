@@ -52,6 +52,26 @@ pub struct InputCommand {
     pub timestamp: u64,
 }
 
+/// Command for server-side code execution - queued by MCP, polled by game ServerScript
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ServerCodeCommand {
+    pub id: Uuid,
+    pub code: String,
+    pub timestamp: u64,
+}
+
+/// Result from server-side code execution
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ServerCodeResult {
+    pub id: Uuid,
+    pub success: bool,
+    pub result: Option<String>,
+    pub error: Option<String>,
+}
+
+// Timeout for waiting for server code execution result
+const SERVER_CODE_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub struct AppState {
     process_queue: VecDeque<ToolArguments>,
     output_map: HashMap<Uuid, mpsc::UnboundedSender<Result<String>>>,
@@ -59,6 +79,10 @@ pub struct AppState {
     trigger: watch::Sender<()>,
     /// Queue of input commands for game to poll
     pub input_command_queue: VecDeque<InputCommand>,
+    /// Queue of server code commands for game to poll
+    pub server_code_queue: VecDeque<ServerCodeCommand>,
+    /// Map of pending server code result channels (waiting for game to respond)
+    pub server_code_results: HashMap<Uuid, mpsc::UnboundedSender<ServerCodeResult>>,
 }
 pub type PackedState = Arc<Mutex<AppState>>;
 
@@ -71,6 +95,8 @@ impl AppState {
             waiter,
             trigger,
             input_command_queue: VecDeque::new(),
+            server_code_queue: VecDeque::new(),
+            server_code_results: HashMap::new(),
         }
     }
 }
@@ -220,6 +246,12 @@ struct ClickGui {
         description = "Path to the GUI element (e.g., 'PlayerGui.MainUI.PlayButton' or 'StarterGui.ScreenGui.Button')"
     )]
     path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
+struct RunServerCode {
+    #[schemars(description = "Luau code to execute in the server context during playtest")]
+    code: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
@@ -471,6 +503,75 @@ impl RBXStudioServer {
                     e
                 ))]))
             }
+        }
+    }
+
+    #[tool(
+        description = "Executes Luau code in the server context during playtest. Unlike run_code which executes in the plugin context, this runs in the actual game server where ServerScriptService scripts execute. Requires MCPServerCodeRunner script in ServerScriptService. Use this to: verify server-side state, test game logic, check _G values set by server scripts, or invoke server functions."
+    )]
+    async fn run_server_code(
+        &self,
+        Parameters(args): Parameters<RunServerCode>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let command_id = Uuid::new_v4();
+        let command = ServerCodeCommand {
+            id: command_id,
+            code: args.code.clone(),
+            timestamp: current_timestamp_ms(),
+        };
+
+        // Create channel to receive result
+        let (tx, mut rx) = mpsc::unbounded_channel::<ServerCodeResult>();
+
+        // Queue the command and register for result
+        {
+            let mut state = self.state.lock().await;
+            state.server_code_queue.push_back(command);
+            state.server_code_results.insert(command_id, tx);
+        }
+
+        // Wait for result with timeout
+        let result = match timeout(SERVER_CODE_TIMEOUT, rx.recv()).await {
+            Ok(Some(result)) => result,
+            Ok(None) => {
+                // Channel closed without response
+                let mut state = self.state.lock().await;
+                state.server_code_results.remove(&command_id);
+                return Ok(CallToolResult::error(vec![Content::text(
+                    "Server code execution channel closed unexpectedly. Is the MCPServerCodeRunner script running?",
+                )]));
+            }
+            Err(_) => {
+                // Timeout elapsed
+                let mut state = self.state.lock().await;
+                state.server_code_results.remove(&command_id);
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Server code execution timed out after {}s. Ensure:\n\
+                    1. Studio is in playtest mode (F5)\n\
+                    2. MCPServerCodeRunner script is in ServerScriptService\n\
+                    3. The script is polling http://localhost:{}/mcp/server_code",
+                    SERVER_CODE_TIMEOUT.as_secs(),
+                    STUDIO_PLUGIN_PORT
+                ))]));
+            }
+        };
+
+        // Clean up
+        {
+            let mut state = self.state.lock().await;
+            state.server_code_results.remove(&command_id);
+        }
+
+        // Return result
+        if result.success {
+            Ok(CallToolResult::success(vec![Content::text(
+                result.result.unwrap_or_else(|| "nil".to_string()),
+            )]))
+        } else {
+            Ok(CallToolResult::error(vec![Content::text(format!(
+                "Server code error: {}",
+                result.error.unwrap_or_else(|| "Unknown error".to_string())
+            ))]))
         }
     }
 
@@ -855,6 +956,40 @@ pub async fn post_input_command_handler(
     let mut state = state.lock().await;
     state.input_command_queue.push_back(request.command);
     (StatusCode::OK, "OK")
+}
+
+/// Response for server code polling endpoint
+#[derive(Debug, Serialize)]
+pub struct ServerCodePollResponse {
+    pub commands: Vec<ServerCodeCommand>,
+    pub count: usize,
+}
+
+/// Handler for GET /mcp/server_code - Game ServerScript polls this to get pending code
+pub async fn get_server_code_handler(
+    State(state): State<PackedState>,
+) -> impl IntoResponse {
+    let mut state = state.lock().await;
+    let commands: Vec<ServerCodeCommand> = state.server_code_queue.drain(..).collect();
+    let count = commands.len();
+    Json(ServerCodePollResponse { commands, count })
+}
+
+/// Handler for POST /mcp/server_code - Game ServerScript posts execution results here
+pub async fn post_server_code_result_handler(
+    State(state): State<PackedState>,
+    Json(result): Json<ServerCodeResult>,
+) -> impl IntoResponse {
+    let mut state = state.lock().await;
+    if let Some(tx) = state.server_code_results.remove(&result.id) {
+        if tx.send(result).is_err() {
+            tracing::warn!("Failed to send server code result - receiver dropped");
+        }
+        (StatusCode::OK, "OK")
+    } else {
+        tracing::warn!("Received server code result for unknown id: {}", result.id);
+        (StatusCode::NOT_FOUND, "Unknown command ID")
+    }
 }
 
 /// Helper to get current timestamp in milliseconds
