@@ -255,18 +255,6 @@ struct RunServerCode {
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
-struct InvokeRemote {
-    #[schemars(
-        description = "Path to RemoteFunction (e.g., 'ReplicatedStorage.Remotes.GetPlayerData')"
-    )]
-    path: String,
-    #[schemars(
-        description = "JSON array of arguments to pass to the RemoteFunction (e.g., '[\"player1\", 100]')"
-    )]
-    args: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
 struct FireRemote {
     #[schemars(description = "Path to RemoteEvent (e.g., 'ReplicatedStorage.Remotes.PlayerAction')")]
     path: String,
@@ -657,45 +645,7 @@ impl RBXStudioServer {
     }
 
     #[tool(
-        description = "Invokes a RemoteFunction on the server and returns the result. Requires MCPServerCodeRunner script in ServerScriptService. Use this to test server-side RemoteFunction handlers during playtest."
-    )]
-    async fn invoke_remote(
-        &self,
-        Parameters(args): Parameters<InvokeRemote>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let args_code = match &args.args {
-            Some(json_args) => format!(
-                "local HttpService = game:GetService('HttpService')\n\
-                local args = HttpService:JSONDecode('{}')\n\
-                return remote:InvokeServer(table.unpack(args))",
-                json_args.replace('\'', "\\'")
-            ),
-            None => "return remote:InvokeServer()".to_string(),
-        };
-
-        let code = format!(
-            r#"local path = "{}"
-local parts = string.split(path, ".")
-local current = game
-for _, part in ipairs(parts) do
-    current = current:FindFirstChild(part)
-    if not current then
-        error("Remote not found: " .. path .. " (failed at: " .. part .. ")")
-    end
-end
-local remote = current
-if not remote:IsA("RemoteFunction") then
-    error("Object at " .. path .. " is not a RemoteFunction, it's a " .. remote.ClassName)
-end
-{}"#,
-            args.path, args_code
-        );
-
-        self.run_generated_server_code(code).await
-    }
-
-    #[tool(
-        description = "Fires a RemoteEvent. Direction can be 'ToServer' (simulate client firing to server), 'ToClient' (server to specific player), or 'ToAllClients'. Requires MCPServerCodeRunner script."
+        description = "Fires a RemoteEvent to clients. Supports 'ToClient' (to specific player) and 'ToAllClients' directions. Note: 'ToServer' is not supported because MCP runs on the server and RemoteEvent.OnServerEvent cannot be manually triggered. Requires MCPServerCodeRunner script in ServerScriptService."
     )]
     async fn fire_remote(
         &self,
@@ -703,16 +653,16 @@ end
     ) -> Result<CallToolResult, ErrorData> {
         let fire_code = match args.direction.as_str() {
             "ToServer" => {
-                match &args.args {
-                    Some(json_args) => format!(
-                        "local HttpService = game:GetService('HttpService')\n\
-                        local args = HttpService:JSONDecode('{}')\n\
-                        remote:FireServer(table.unpack(args))\n\
-                        return 'Fired to server'",
-                        json_args.replace('\'', "\\'")
-                    ),
-                    None => "remote:FireServer()\nreturn 'Fired to server'".to_string(),
-                }
+                // ToServer doesn't work from server context because:
+                // 1. FireServer() is client-only
+                // 2. OnServerEvent can't be manually triggered (it's an RBXScriptSignal, not BindableEvent)
+                // For testing server event handlers, use run_server_code to call the handler function directly
+                return Ok(CallToolResult::error(vec![Content::text(
+                    "ToServer direction not supported: MCP runs on the server, and RemoteEvent.OnServerEvent \
+                    cannot be manually triggered. To test server event handlers, use run_server_code to call \
+                    the handler function directly, or use simulate_input/click_gui to trigger client actions \
+                    that fire the remote."
+                )]));
             }
             "ToClient" => {
                 let player_name = args.player_name.as_deref().unwrap_or("Unknown");
