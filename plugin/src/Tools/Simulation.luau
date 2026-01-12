@@ -66,16 +66,10 @@ local function startSimulation(): string
 end
 
 local function stopSimulation(): string
-	-- Check if already stopped
-	if not RunService:IsRunning() then
-		return HttpService:JSONEncode({
-			success = true,
-			verified = true,
-			note = "Already in edit mode.",
-			mode = "edit",
-		})
-	end
+	-- Note: We cannot reliably check IsRunning() because it returns false from plugin
+	-- context during playtest due to DataModel isolation. We'll try to stop anyway.
 
+	local wasRunning = RunService:IsRunning()
 	local previousMode = RunService:IsRunMode() and "simulation" or "playtest"
 
 	local success, err = pcall(function()
@@ -86,26 +80,37 @@ local function stopSimulation(): string
 		return HttpService:JSONEncode({
 			success = false,
 			error = "RunService:Stop() failed: " .. tostring(err),
-			previousMode = previousMode,
 		})
 	end
 
-	-- Verify simulation/playtest stopped
-	local verified, verifyErr = waitForState(false, VERIFICATION_TIMEOUT)
-
-	if verified then
+	-- For simulation mode, verification works. For playtest, IsRunning() was already false.
+	if wasRunning then
+		-- We were in simulation mode - verify it stopped
+		local verified, verifyErr = waitForState(false, VERIFICATION_TIMEOUT)
+		if verified then
+			return HttpService:JSONEncode({
+				success = true,
+				verified = true,
+				previousMode = previousMode,
+				mode = "edit",
+				note = "Stopped " .. previousMode .. ". Returned to edit mode.",
+			})
+		else
+			return HttpService:JSONEncode({
+				success = false,
+				error = "Stop call succeeded but verification failed: " .. tostring(verifyErr),
+				previousMode = previousMode,
+			})
+		end
+	else
+		-- IsRunning() was false - we're either in edit mode OR playtest mode
+		-- (can't tell from plugin context due to DataModel isolation)
+		-- RunService:Stop() only works for simulation mode, NOT playtest mode.
+		-- For playtest, user must manually stop OR use run_server_code with EndTest()
 		return HttpService:JSONEncode({
 			success = true,
-			verified = true,
-			previousMode = previousMode,
 			mode = "edit",
-			note = "Stopped " .. previousMode .. ". Returned to edit mode.",
-		})
-	else
-		return HttpService:JSONEncode({
-			success = false,
-			error = "Stop call succeeded but verification failed: " .. tostring(verifyErr),
-			previousMode = previousMode,
+			note = "RunService:Stop() called. Note: This only stops SIMULATION mode. For PLAYTEST mode, use run_server_code to call StudioTestService:EndTest(), or manually press Stop (F6).",
 		})
 	end
 end

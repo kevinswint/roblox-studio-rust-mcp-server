@@ -33,49 +33,43 @@ local function waitForState(targetRunning: boolean, timeout: number): (boolean, 
 end
 
 local function startPlaytest(): string
-	-- Check if already in playtest/simulation mode
-	if RunService:IsRunning() then
-		return HttpService:JSONEncode({
-			success = false,
-			error = "Studio is already running. Call stop_playtest first.",
-			currentMode = RunService:IsRunMode() and "simulation" or "playtest",
-		})
-	end
+	-- Note: We cannot reliably check if already running because RunService:IsRunning()
+	-- returns false from plugin context during playtest due to DataModel isolation.
+	-- StudioTestService will return an error if playtest is already running.
 
 	-- Try StudioTestService first (starts with player character)
 	if StudioTestService then
-		local success, err = pcall(function()
-			-- ExecutePlayModeAsync is a yielding function - it waits until playtest starts
-			StudioTestService:ExecutePlayModeAsync({})
+		-- Use task.spawn because ExecutePlayModeAsync yields/blocks until playtest starts.
+		-- We need to return the HTTP response immediately, not wait for playtest to fully load.
+		local startError = nil
+		task.spawn(function()
+			local success, err = pcall(function()
+				StudioTestService:ExecutePlayModeAsync({})
+			end)
+			if not success then
+				startError = tostring(err)
+				warn("[MCP] ExecutePlayModeAsync failed: " .. startError)
+			end
 		end)
 
-		if not success then
+		-- Give it a moment to check for immediate errors (like "already running")
+		task.wait(0.5)
+
+		if startError then
 			return HttpService:JSONEncode({
 				success = false,
-				error = "ExecutePlayModeAsync failed: " .. tostring(err),
+				error = "ExecutePlayModeAsync failed: " .. startError,
 				suggestion = "Try stopping any pending playtest operations first.",
 			})
 		end
 
-		-- Verify playtest actually started
-		local verified, verifyErr = waitForState(true, VERIFICATION_TIMEOUT)
-
-		if verified then
-			-- Additional check: verify it's playtest mode (not simulation)
-			local isPlaytest = RunService:IsRunning() and not RunService:IsRunMode()
-			return HttpService:JSONEncode({
-				success = true,
-				verified = true,
-				mode = isPlaytest and "playtest" or "simulation",
-				hasPlayer = isPlaytest,
-			})
-		else
-			return HttpService:JSONEncode({
-				success = false,
-				error = "Playtest started but verification failed: " .. tostring(verifyErr),
-				isRunning = RunService:IsRunning(),
-			})
-		end
+		-- Command was sent - playtest should be starting
+		return HttpService:JSONEncode({
+			success = true,
+			mode = "playtest",
+			hasPlayer = true,
+			note = "Started playtest mode (F5) via StudioTestService. State cannot be verified from plugin context.",
+		})
 	end
 
 	-- Fallback: StudioTestService not available, use RunService:Run() (simulation mode)
@@ -90,7 +84,8 @@ local function startPlaytest(): string
 		})
 	end
 
-	-- Verify simulation started
+	-- For simulation mode, RunService:IsRunning() DOES work from plugin context
+	-- because simulation runs in the same DataModel
 	local verified, verifyErr = waitForState(true, VERIFICATION_TIMEOUT)
 
 	if verified then
