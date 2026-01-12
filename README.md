@@ -4,6 +4,36 @@
 
 This fork adds new MCP tools that enable AI assistants to create complete, functional Roblox games. The upstream repository has not merged community contributions since July 2025.
 
+---
+
+## ⚠️ IMPORTANT: Playtest Control Limitations
+
+**The MCP plugin runs in a separate DataModel from playtest mode.** This causes critical limitations:
+
+| Feature | Simulation (F8) | Playtest (F5) |
+|---------|-----------------|---------------|
+| `start_simulation` | ✅ Works | N/A |
+| `start_playtest` | N/A | ✅ Works |
+| `stop_simulation` | ✅ Works | ❌ No effect |
+| `stop_playtest` | ✅ Works | ❌ No effect |
+| `run_code` | ✅ Full access | ⚠️ Plugin context only |
+| `run_server_code` | N/A | ✅ Requires MCPServerCodeRunner |
+
+### To Enable Full Playtest Control
+
+Add **MCPServerCodeRunner** to your game's `ServerScriptService`:
+
+1. Copy `MCPServerCodeRunner.lua` from this repository to `ServerScriptService`
+2. Enable HttpService: Game Settings → Security → Allow HTTP Requests
+3. Now you can:
+   - Stop playtest: `run_server_code({ code = "game:GetService('StudioTestService'):EndTest('done')" })`
+   - Execute server-side code during playtest
+   - Access server-side `_G` values and game state
+
+**Without MCPServerCodeRunner**, you must manually press F6 or the Stop button to end playtest.
+
+---
+
 ## Additional Tools in This Fork
 
 ### `write_script`
@@ -98,10 +128,15 @@ get_studio_state({})
 
 Starts playtest or simulation mode.
 
-- `start_playtest` - Starts play mode with a player character
-- `start_simulation` - Starts run mode without a player (physics only)
+- `start_playtest` - Starts play mode (F5) with a player character
+- `start_simulation` - Starts run mode (F8) without a player (physics only)
 
 **Parameters:** None
+
+**Example:**
+```
+start_playtest({})
+```
 
 ---
 
@@ -110,6 +145,14 @@ Starts playtest or simulation mode.
 Stops playtest/simulation and returns to edit mode.
 
 **Parameters:** None
+
+**⚠️ Limitation:** `stop_playtest` only works for **simulation mode (F8)**, not playtest mode (F5). See [Playtest Control Limitations](#️-important-playtest-control-limitations) above.
+
+**To stop playtest programmatically:**
+```
+run_server_code({ code = "game:GetService('StudioTestService'):EndTest('done')" })
+```
+Requires MCPServerCodeRunner in your game.
 
 ---
 
@@ -165,6 +208,55 @@ Moves or teleports a character in the workspace.
 ```
 move_character({ x: 0, y: 5, z: 10, instant: true, character_name: "Aria" })
 ```
+
+---
+
+### `run_server_code`
+
+Executes Luau code in the **server context** during playtest (not the plugin context).
+
+**Why this matters:** `run_code` executes in the plugin's DataModel, which is isolated from the running game during playtest. `run_server_code` executes in the actual game server, giving access to:
+- Server-side `_G` values set by your scripts
+- DataStores and other server-only services
+- The ability to call `StudioTestService:EndTest()` to stop playtest
+- Full game state from the server perspective
+
+**Parameters:**
+- `code` - Luau code to execute
+
+**Examples:**
+```lua
+-- Check a server-side global value
+run_server_code({ code = "return _G.GameState" })
+
+-- Get all players
+run_server_code({ code = "return game.Players:GetPlayers()" })
+
+-- Stop playtest programmatically
+run_server_code({ code = "game:GetService('StudioTestService'):EndTest('done')" })
+```
+
+**Requires:** MCPServerCodeRunner script in ServerScriptService. See [Server Code Execution Setup](#server-code-execution-setup) below.
+
+---
+
+## Server Code Execution Setup
+
+To enable `run_server_code` and programmatic playtest stopping, add **MCPServerCodeRunner** to your game:
+
+1. **Enable HttpService:** Game Settings → Security → Allow HTTP Requests
+
+2. **Add MCPServerCodeRunner** (Script) to `ServerScriptService`:
+   - Copy `MCPServerCodeRunner.lua` from this repository
+   - The script polls `localhost:44755/mcp/server_code` for commands
+   - Executes code using `loadstring()` and returns results
+
+**Verification:**
+- Start playtest (F5)
+- Check output for `[MCPServerCodeRunner] Starting server code poll loop`
+- Test with: `run_server_code({ code = "return 'Hello from server!'" })`
+
+**Security Note:** MCPServerCodeRunner executes arbitrary code. Only use during local development. Do NOT include in published games.
 
 ---
 
