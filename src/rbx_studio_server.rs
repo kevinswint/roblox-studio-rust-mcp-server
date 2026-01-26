@@ -5,7 +5,7 @@ use axum::{extract::State, Json};
 use base64::Engine;
 use color_eyre::eyre::{Error, OptionExt};
 use rmcp::{
-    handler::server::tool::Parameters,
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
         CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
     },
@@ -13,7 +13,6 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{mpsc, watch, Mutex};
@@ -119,16 +118,22 @@ impl ToolArguments {
 #[derive(Clone)]
 pub struct RBXStudioServer {
     state: PackedState,
-    tool_router: rmcp::handler::server::tool::ToolRouter<Self>,
+    tool_router: ToolRouter<Self>,
 }
 
 #[tool_handler]
 impl ServerHandler for RBXStudioServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
-            protocol_version: ProtocolVersion::V_2025_03_26,
+            protocol_version: ProtocolVersion::LATEST,
             capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation::from_build_env(),
+            server_info: Implementation {
+                name: "Roblox_Studio".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                title: Some("Roblox Studio MCP Server".to_string()),
+                icons: None,
+                website_url: None,
+            },
             instructions: Some(
                 "User run_command to query data from Roblox Studio place or to change it"
                     .to_string(),
