@@ -1,7 +1,8 @@
 name: Code Quality Checks
 
 on:
-  pull_request:
+  - push
+  - pull_request
 
 jobs:
   clippy:

@@ -354,6 +354,34 @@ Contributions welcome! If you have improvements:
 
 ---
 
+## Future Enhancement Ideas
+
+The following features would improve the MCP workflow but are not yet implemented:
+
+### 1. Reliable Playtest Stop (F6 equivalent)
+
+**Problem:** `stop_playtest` only works for simulation mode (F8), not playtest mode (F5). Users must manually press F6 to stop playtest.
+
+**Potential Solution:**
+- Expose `StudioTestService:EndTest()` more reliably from the plugin context
+- Or create a native Rust command that sends keystrokes (F6) to the Studio window
+- The `run_server_code` workaround exists but requires MCPServerCodeRunner setup
+
+### 2. Restart Studio Programmatically
+
+**Problem:** Sometimes Studio needs a full restart (stale state, plugin issues, etc.). Currently requires manual intervention.
+
+**Potential Solution:**
+- Create an external helper that can:
+  - Close Roblox Studio gracefully
+  - Relaunch Studio with the same place file
+  - Wait for MCP plugin to reconnect
+- On macOS: Use AppleScript or `osascript` commands
+- On Windows: Use PowerShell or native Windows APIs
+- Would need to persist the current place file path for reopening
+
+---
+
 ## Original README
 
 *The following is from the original Roblox repository:*
