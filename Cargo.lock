@@ -2441,9 +2441,11 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "chrono",
  "clap 4.5.54",
  "color-eyre",
  "core-foundation 0.10.1",
+ "futures",
  "image",
  "native-dialog",
  "reqwest 0.13.1",

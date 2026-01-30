@@ -322,19 +322,34 @@ Calculates what UI would look like at a specific viewport size without using Dev
 
 ### `search_assets`
 
-Searches the Roblox marketplace and returns a list of matching assets with metadata.
+Searches the Roblox marketplace and returns assets ranked by quality score.
 
-**Why this matters:** The existing `insert_model` tool just inserts the first search result without letting you evaluate options. `search_assets` returns multiple results with IDs, names, and creators so you can choose the best asset before inserting.
+**Why this matters:** The existing `insert_model` tool just inserts the first search result without letting you evaluate options. `search_assets` returns multiple results with quality scoring based on favorites, creator verification, and recency - helping you find the best assets faster.
 
 **Parameters:**
 - `query` - Search query (e.g., "medieval castle", "tree", "sci-fi weapon")
 - `max_results` (optional) - Maximum results to return (default: 10, max: 20)
 
-**Returns:** List of assets with ID, name, and creator. Use `preview_asset` to see what an asset looks like before inserting.
+**Returns:** Assets ranked by quality score, including:
+- Favorites count (fetched from Roblox catalog API)
+- Creator verification status (✓ badge)
+- Quality score (based on favorites, verification, recency, description)
+
+**Quality Score Factors:**
+- **Favorites** (logarithmic): Higher favorites = higher score, with diminishing returns
+- **Verified Creator** (+20 points): Assets from verified creators rank higher
+- **Recency** (up to +15 points): Recently updated assets get a bonus
+- **Description Quality** (up to +10 points): Well-documented assets score better
 
 **Example:**
 ```
-search_assets({ query: "tree", max_results: 5 })
+search_assets({ query: "medieval castle", max_results: 5 })
+// Returns:
+// 1. Medieval Castle Gate (ID: 4681785203)
+//    Creator: Glectic | ⭐ 11 favorites | Score: 24.0
+// 2. Medieval Castle Wall (ID: 249012759)
+//    Creator: Auzer | ⭐ 5 favorites | Score: 16.1
+// ...
 ```
 
 **Status:** [PR #70](https://github.com/Roblox/studio-rust-mcp-server/pull/70) submitted to upstream
@@ -654,13 +669,13 @@ Executes Luau code in the Studio plugin context and returns printed output.
 Searches the Roblox marketplace and inserts the first matching model into the workspace.
 
 ### search_assets
-Searches the Roblox marketplace and returns a list of matching assets with metadata.
+Searches the Roblox marketplace and returns assets ranked by quality score.
 
 **Parameters:**
 - `query`: Search query (e.g., "medieval castle", "sci-fi weapon")
 - `max_results`: Maximum results to return (default: 10, max: 20)
 
-**Returns:** List of assets with ID, name, and creator. Use `preview_asset` to see what an asset looks like before inserting.
+**Returns:** Assets ranked by quality score with favorites count, creator verification status, and score. Quality scoring considers favorites (logarithmic), verified creators (+20), recency (up to +15), and description quality (up to +10).
 
 **Example prompt:** "Search for tree assets and show me the options"
 
