@@ -66,6 +66,16 @@ export type PreviewLayoutArgs = {
 	path: string?, -- Optional path to specific ScreenGui
 }
 
+export type SearchAssetsArgs = {
+	query: string,
+	max_results: number?,
+}
+
+export type PreviewAssetArgs = {
+	asset_id: number,
+	keep: boolean?,
+}
+
 export type ToolArgs =
 	{ InsertModel: InsertModelArgs }
 	| { RunCode: RunCodeArgs }
@@ -83,6 +93,8 @@ export type ToolArgs =
 	| { ValidateUI: ValidateUIArgs }
 	| { CreateResponsiveLayout: CreateResponsiveLayoutArgs }
 	| { PreviewLayout: PreviewLayoutArgs }
+	| { SearchAssets: SearchAssetsArgs }
+	| { PreviewAsset: PreviewAssetArgs }
 
 export type ToolFunction = (ToolArgs) -> string?
 

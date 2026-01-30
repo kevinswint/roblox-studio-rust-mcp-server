@@ -626,6 +626,22 @@ struct PreviewLayout {
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
+struct SearchAssets {
+    #[schemars(description = "Search query for finding assets (e.g., 'medieval castle', 'sci-fi weapon', 'tree')")]
+    query: String,
+    #[schemars(description = "Maximum number of results to return (default: 10, max: 20)")]
+    max_results: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
+struct PreviewAsset {
+    #[schemars(description = "Asset ID to preview (from search_assets results)")]
+    asset_id: u64,
+    #[schemars(description = "Whether to keep the asset in workspace after preview (default: false - removes after screenshot)")]
+    keep: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
 enum ToolArgumentValues {
     RunCode(RunCode),
     InsertModel(InsertModel),
@@ -641,6 +657,8 @@ enum ToolArgumentValues {
     ValidateUI(ValidateUI),
     CreateResponsiveLayout(CreateResponsiveLayout),
     PreviewLayout(PreviewLayout),
+    SearchAssets(SearchAssets),
+    PreviewAsset(PreviewAsset),
     // Note: SimulateInput and ClickGui are handled directly by Rust (HTTP polling)
     // and don't go through the Luau plugin
 }
@@ -1268,6 +1286,28 @@ end
         Parameters(args): Parameters<PreviewLayout>,
     ) -> Result<CallToolResult, ErrorData> {
         self.generic_tool_run(ToolArgumentValues::PreviewLayout(args))
+            .await
+    }
+
+    #[tool(
+        description = "Searches the Roblox marketplace for assets matching a query. Returns a list of assets with their IDs, names, and creators - allowing you to choose the best option before inserting. Use preview_asset to see what an asset looks like before deciding."
+    )]
+    async fn search_assets(
+        &self,
+        Parameters(args): Parameters<SearchAssets>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.generic_tool_run(ToolArgumentValues::SearchAssets(args))
+            .await
+    }
+
+    #[tool(
+        description = "Previews an asset by temporarily inserting it and taking a screenshot. Use this to see what an asset looks like before committing to it. Set keep=true to keep the asset in workspace, or leave as default to remove after screenshot."
+    )]
+    async fn preview_asset(
+        &self,
+        Parameters(args): Parameters<PreviewAsset>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.generic_tool_run(ToolArgumentValues::PreviewAsset(args))
             .await
     }
 
