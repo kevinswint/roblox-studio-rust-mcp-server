@@ -596,6 +596,30 @@ struct FireRemote {
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
+struct ValidateUI {
+    #[schemars(description = "Optional path to ScreenGui to validate (e.g., 'StarterGui.MainUI'). If not specified, validates all ScreenGuis.")]
+    path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
+struct CreateResponsiveLayout {
+    #[schemars(description = "Name for the ScreenGui (e.g., 'MainUI')")]
+    name: String,
+    #[schemars(description = "Array of container positions to create: 'TopLeft', 'TopRight', 'TopCenter', 'BottomLeft', 'BottomRight', 'BottomCenter', 'CenterLeft', 'CenterRight', 'Center'")]
+    containers: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
+struct PreviewLayout {
+    #[schemars(description = "Target viewport width in pixels (e.g., 390 for iPhone 14)")]
+    width: f64,
+    #[schemars(description = "Target viewport height in pixels (e.g., 844 for iPhone 14)")]
+    height: f64,
+    #[schemars(description = "Optional path to specific ScreenGui. If not specified, previews all ScreenGuis.")]
+    path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
 enum ToolArgumentValues {
     RunCode(RunCode),
     InsertModel(InsertModel),
@@ -607,6 +631,9 @@ enum ToolArgumentValues {
     StopSimulation(StopSimulation),
     StopPlaytest(StopPlaytest),
     MoveCharacter(MoveCharacter),
+    ValidateUI(ValidateUI),
+    CreateResponsiveLayout(CreateResponsiveLayout),
+    PreviewLayout(PreviewLayout),
     // Note: SimulateInput and ClickGui are handled directly by Rust (HTTP polling)
     // and don't go through the Luau plugin
 }
@@ -1191,6 +1218,39 @@ end
         );
 
         self.run_generated_server_code(code).await
+    }
+
+    #[tool(
+        description = "Validates UI elements for common layout issues. Checks for: overlapping elements, offscreen elements, pixel positioning (Offset without Scale), missing UISizeConstraint, and AnchorPoint/Position mismatches. Returns a JSON report of issues found."
+    )]
+    async fn validate_ui(
+        &self,
+        Parameters(args): Parameters<ValidateUI>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.generic_tool_run(ToolArgumentValues::ValidateUI(args))
+            .await
+    }
+
+    #[tool(
+        description = "Creates a responsive UI layout with best-practice container structure. Creates a ScreenGui with positioned containers that include UISizeConstraint and UIListLayout for proper responsive behavior."
+    )]
+    async fn create_responsive_layout(
+        &self,
+        Parameters(args): Parameters<CreateResponsiveLayout>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.generic_tool_run(ToolArgumentValues::CreateResponsiveLayout(args))
+            .await
+    }
+
+    #[tool(
+        description = "Calculates what UI layout would look like at a specific viewport size (e.g., mobile device). Returns JSON with element positions and sizes, identifying elements that would be offscreen or overlapping. Useful for checking mobile layouts without the Device Emulator."
+    )]
+    async fn preview_layout(
+        &self,
+        Parameters(args): Parameters<PreviewLayout>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.generic_tool_run(ToolArgumentValues::PreviewLayout(args))
+            .await
     }
 
     async fn generic_tool_run(

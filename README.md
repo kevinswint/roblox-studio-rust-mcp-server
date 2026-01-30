@@ -245,6 +245,55 @@ run_server_code({ code = "game:GetService('StudioTestService'):EndTest('done')" 
 
 **Requires:** MCPServerCodeRunner script in ServerScriptService. See [Server Code Execution Setup](#server-code-execution-setup) below.
 
+### `validate_ui`
+
+Scans UI for common responsive layout issues. Returns a JSON report of problems found.
+
+**Parameters:**
+- `path` - Optional path to ScreenGui (e.g., `"StarterGui.MainUI"`). If not specified, validates all ScreenGuis.
+
+**Checks for:**
+- **Overlapping elements** - GUI elements that visually overlap
+- **Offscreen elements** - Elements extending beyond viewport boundaries
+- **Pixel positioning** - Using Offset without Scale (not responsive)
+- **Missing constraints** - Containers without UISizeConstraint
+- **Anchor mismatches** - AnchorPoint doesn't match Position alignment
+
+**Example prompt:** "Validate my UI for layout issues"
+
+### `create_responsive_layout`
+
+Creates a ScreenGui with best-practice responsive container structure.
+
+**Parameters:**
+- `name` - Name for the ScreenGui (e.g., `"MainUI"`)
+- `containers` - Array of positions: `"TopLeft"`, `"TopRight"`, `"TopCenter"`, `"BottomLeft"`, `"BottomRight"`, `"BottomCenter"`, `"CenterLeft"`, `"CenterRight"`, `"Center"`
+
+**Each container includes:**
+- Correct `AnchorPoint` and `Position` for its location
+- `UISizeConstraint` (Min 100x50, Max 400x600)
+- `UIListLayout` for automatic child arrangement
+- `UIPadding` for internal spacing
+
+**Example prompt:** "Create a responsive UI with containers in the top-left and bottom-center"
+
+### `preview_layout`
+
+Calculates what UI would look like at a specific viewport size without using Device Emulator.
+
+**Parameters:**
+- `width` - Target viewport width in pixels (e.g., `390` for iPhone 14)
+- `height` - Target viewport height in pixels (e.g., `844` for iPhone 14)
+- `path` - Optional path to ScreenGui. If not specified, previews all ScreenGuis.
+
+**Returns JSON with:**
+- Element positions and sizes at target viewport
+- `offscreen` flag for elements extending beyond viewport
+- `clipped` flag for partially visible elements
+- Summary of total elements and issues found
+
+**Example prompt:** "Preview my UI at iPhone 14 dimensions (390x844)"
+
 ---
 
 ## Server Code Execution Setup

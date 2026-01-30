@@ -47,6 +47,21 @@ export type ClickGuiArgs = {
 	path: string, -- Path to GUI element (e.g., "PlayerGui.MainUI.Button")
 }
 
+export type ValidateUIArgs = {
+	path: string?, -- Optional path to ScreenGui to validate
+}
+
+export type CreateResponsiveLayoutArgs = {
+	name: string, -- Name for the ScreenGui
+	containers: {string}, -- Array of container positions to create
+}
+
+export type PreviewLayoutArgs = {
+	width: number, -- Target viewport width in pixels
+	height: number, -- Target viewport height in pixels
+	path: string?, -- Optional path to specific ScreenGui
+}
+
 export type ToolArgs =
 	{ InsertModel: InsertModelArgs }
 	| { RunCode: RunCodeArgs }
@@ -60,6 +75,9 @@ export type ToolArgs =
 	| { MoveCharacter: MoveCharacterArgs }
 	| { SimulateInput: SimulateInputArgs }
 	| { ClickGui: ClickGuiArgs }
+	| { ValidateUI: ValidateUIArgs }
+	| { CreateResponsiveLayout: CreateResponsiveLayoutArgs }
+	| { PreviewLayout: PreviewLayoutArgs }
 
 export type ToolFunction = (ToolArgs) -> string?
 
