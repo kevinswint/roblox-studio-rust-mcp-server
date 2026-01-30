@@ -320,6 +320,63 @@ Calculates what UI would look like at a specific viewport size without using Dev
 
 ---
 
+### `search_assets`
+
+Searches the Roblox marketplace and returns a list of matching assets with metadata.
+
+**Why this matters:** The existing `insert_model` tool just inserts the first search result without letting you evaluate options. `search_assets` returns multiple results with IDs, names, and creators so you can choose the best asset before inserting.
+
+**Parameters:**
+- `query` - Search query (e.g., "medieval castle", "tree", "sci-fi weapon")
+- `max_results` (optional) - Maximum results to return (default: 10, max: 20)
+
+**Returns:** List of assets with ID, name, and creator. Use `preview_asset` to see what an asset looks like before inserting.
+
+**Example:**
+```
+search_assets({ query: "tree", max_results: 5 })
+```
+
+**Status:** [PR #70](https://github.com/Roblox/studio-rust-mcp-server/pull/70) submitted to upstream
+
+---
+
+### `preview_asset`
+
+Previews an asset by inserting it into the workspace temporarily. Allows you to evaluate what an asset looks like before committing to it.
+
+**Why this matters:** Combines with `search_assets` to enable a proper discovery workflow: search → preview candidates → compare → keep the winner.
+
+**Parameters:**
+- `asset_id` - The asset ID (from search_assets results)
+- `keep` (optional) - If true, keeps the asset permanently; if false/omitted, removes on next preview
+
+**Returns:** Asset metadata including class type, bounding box size, child counts, and contents.
+
+**Features:**
+- Positions asset in front of camera for visibility
+- Auto-cleans previous preview when previewing a new asset
+- Returns detailed metadata for programmatic use
+
+**Example workflow:**
+```
+search_assets({ query: "tree" })
+// Returns: 1. Tree House (ID: 125459331), 2. Tree (ID: 580221169), ...
+
+preview_asset({ asset_id: 580221169 })
+// Returns: Model, 39.7 x 38.3 x 39.3 studs, 38 descendants
+
+preview_asset({ asset_id: 125459331 })
+// Previous preview removed, now showing Tree House
+
+preview_asset({ asset_id: 580221169, keep: true })
+// Keeps this tree permanently in workspace
+```
+
+**Status:** [PR #70](https://github.com/Roblox/studio-rust-mcp-server/pull/70) submitted to upstream
+
+---
+
 ## Server Code Execution Setup
 
 To enable `run_server_code` and programmatic playtest stopping, add **MCPServerCodeRunner** to your game:
