@@ -11,6 +11,10 @@ export type WriteScriptArgs = {
 	source: string,
 }
 
+export type ReadScriptArgs = {
+	path: string,
+}
+
 export type ReadOutputArgs = {
 	filter: string?, -- "all" | "print" | "warn" | "error"
 	max_lines: number?, -- Maximum number of lines to return (default: 1000)
@@ -66,6 +70,7 @@ export type ToolArgs =
 	{ InsertModel: InsertModelArgs }
 	| { RunCode: RunCodeArgs }
 	| { WriteScript: WriteScriptArgs }
+	| { ReadScript: ReadScriptArgs }
 	| { ReadOutput: ReadOutputArgs }
 	| { GetStudioState: GetStudioStateArgs }
 	| { StartPlaytest: StartPlaytestArgs }

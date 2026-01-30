@@ -70,6 +70,30 @@ write_script({
 
 ---
 
+### `read_script`
+
+Reads the source code of an existing Script, LocalScript, or ModuleScript.
+
+**Why this matters:** Enables AI to understand existing code before modifying it, supports diff/patch workflows, and allows inspection of any script in the game hierarchy.
+
+**Parameters:**
+- `path` - Path to script in game hierarchy (e.g., `ServerScriptService.GameManager`)
+
+**Returns:** Full source code with metadata (script type, path, character count, line count)
+
+**Example:**
+```
+read_script({
+  path: "ServerScriptService.GameManager"
+})
+-- Returns: [SUCCESS] Script at ServerScriptService.GameManager (150 chars, 12 lines)
+-- <source code follows>
+```
+
+**Status:** [PR #52](https://github.com/Roblox/studio-rust-mcp-server/pull/52) submitted to upstream
+
+---
+
 ### `capture_screenshot`
 
 Captures a screenshot of the Roblox Studio window and returns it as a JPEG image.
@@ -404,7 +428,7 @@ This builds the MCP server, installs the Studio plugin, and configures Claude.
 ### Verify setup
 
 1. Open Roblox Studio and check the **Plugins** tab for the MCP plugin
-2. In Claude, verify tools are available: `run_code`, `insert_model`, `write_script`, `capture_screenshot`, `read_output`, `get_studio_state`, `start_playtest`, `start_simulation`, `stop_simulation`, `stop_playtest`
+2. In Claude, verify tools are available: `run_code`, `insert_model`, `write_script`, `read_script`, `capture_screenshot`, `read_output`, `get_studio_state`, `start_playtest`, `start_simulation`, `stop_simulation`, `stop_playtest`
 
 ---
 
