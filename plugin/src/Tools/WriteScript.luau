@@ -6,6 +6,7 @@ local ScriptEditorService = game:GetService("ScriptEditorService")
 type WriteScriptArgs = {
 	path: string,
 	source: string,
+	script_type: string?,
 }
 
 local SCRIPT_CLASSES = {
@@ -123,8 +124,8 @@ local function handleWriteScript(args: Types.ToolArgs): string?
 		return "[ERROR] Missing source parameter"
 	end
 
-	-- Use defaults (simplified version)
-	local scriptType = "Script"
+	-- Use script_type parameter or default to "Script"
+	local scriptType = writeArgs.script_type or "Script"
 	local createIfMissing = true
 
 	-- Get or create the script

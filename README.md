@@ -45,6 +45,7 @@ Creates or updates Script, LocalScript, or ModuleScript instances with provided 
 **Parameters:**
 - `path` - Path to script in game hierarchy (e.g., `ServerScriptService.Managers.GameManager`)
 - `source` - The Luau source code to write
+- `script_type` (optional) - Type of script to create: `"Script"`, `"LocalScript"`, or `"ModuleScript"`. Defaults to `"Script"`. Only used when creating new scripts.
 
 **Features:**
 - Creates scripts in any service (ServerScriptService, ReplicatedStorage, StarterPlayerScripts, etc.)
@@ -56,6 +57,12 @@ Creates or updates Script, LocalScript, or ModuleScript instances with provided 
 write_script({
   path: "ServerScriptService.GameManager",
   source: "print('Hello from AI!')"
+})
+
+write_script({
+  path: "ReplicatedStorage.Utils.MathHelpers",
+  source: "local M = {} ... return M",
+  script_type: "ModuleScript"
 })
 ```
 
@@ -267,34 +274,52 @@ Input simulation (`simulate_input`, `click_gui`) uses HTTP polling because:
 - Input must be executed on the client
 - Roblox's DataModel isolation prevents direct communication during playtest
 
-**Required Scripts:**
+**Setup:**
 
-1. Enable HttpService: Game Settings > Security > Allow HTTP Requests
+1. Enable HttpService: Game Settings → Security → Allow HTTP Requests
+2. Use `simulate_input` or `click_gui` - **scripts are auto-installed** on first use
+3. Restart playtest (F5) to load the newly installed scripts
 
-2. Add **MCPInputPoller** (Script) to `ServerScriptService`:
-   - Polls `localhost:44755/mcp/input` for commands
-   - Relays commands to clients via RemoteEvent
+**Auto-installed Scripts:**
 
-3. Add **MCPInputHandler** (LocalScript) to `StarterPlayerScripts`:
-   - Receives commands from server
-   - Fires `MCPInputReceived` BindableEvent for game scripts
+| Script | Location | Purpose |
+|--------|----------|---------|
+| MCPInputPoller | ServerScriptService | Polls `localhost:44755/mcp/input` for commands, relays to clients |
+| MCPInputHandler | StarterPlayerScripts | Receives commands, fires `MCPInputReceived` BindableEvent |
+| MCPMovementHandler | StarterPlayerScripts | Translates WASD/Space input into character movement |
+| MCPClickSupport | ReplicatedStorage | ModuleScript for handling both real and MCP GUI clicks |
 
-**Optional Scripts (for full automation):**
+**MCPClickSupport Usage:**
 
-4. Add **MCPMovementController** (LocalScript) to `StarterPlayerScripts`:
-   - Enables WASD movement via MCP input
-   - Enables Space to jump
-   - Listens to `MCPInputReceived` and controls Humanoid
+For buttons that need to respond to both real clicks and `click_gui`:
 
-5. Add **Ability Integration** to your existing ability scripts:
-   - Listen to `MCPInputReceived` for ability keys (Q, E, R, F, etc.)
-   - Trigger abilities when MCP input is received
+```lua
+local MCP = require(game.ReplicatedStorage.MCPClickSupport)
 
-See `MCPInputPoller.lua` in this repository for complete script code and examples.
+MCP.onClick(button, function()
+    print("Button clicked!")
+end)
+```
+
+This replaces `button.MouseButton1Click:Connect()` and handles both input sources.
+
+**Custom Ability Integration:**
+
+To trigger abilities via MCP input, listen to the `MCPInputReceived` BindableEvent:
+
+```lua
+local mcpEvent = game.ReplicatedStorage:WaitForChild("MCPInputReceived")
+mcpEvent.Event:Connect(function(inputInfo)
+    if inputInfo.KeyCode == Enum.KeyCode.E and inputInfo.UserInputState == Enum.UserInputState.Begin then
+        -- Trigger ability
+    end
+end)
+```
 
 **Verification:**
-- Check output for `[MCPPoller] Starting poll loop`
+- Check output for `[MCPPoller] Started - polling`
 - Check output for `[MCPInput] Client handler ready!`
+- Check output for `[MCPMovement] Handler ready - WASD and Space supported`
 - Send `simulate_input` and verify `[MCPPoller] Got 1 commands!`
 
 ---

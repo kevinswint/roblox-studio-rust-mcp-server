@@ -13,6 +13,9 @@ end)
 -- Configuration
 local VERIFICATION_TIMEOUT = 10 -- seconds to wait for state change
 local POLL_INTERVAL = 0.1 -- seconds between state checks
+local MAX_RETRIES = 10 -- number of retries for pending operation error
+local RETRY_DELAY = 0.5 -- seconds between retries
+local ERROR_CHECK_DELAY = 0.3 -- seconds to wait for immediate errors
 
 -- Wait for RunService state to change with timeout
 local function waitForState(targetRunning: boolean, timeout: number): (boolean, string?)
@@ -39,36 +42,67 @@ local function startPlaytest(): string
 
 	-- Try StudioTestService first (starts with player character)
 	if StudioTestService then
-		-- Use task.spawn because ExecutePlayModeAsync yields/blocks until playtest starts.
-		-- We need to return the HTTP response immediately, not wait for playtest to fully load.
-		local startError = nil
-		task.spawn(function()
-			local success, err = pcall(function()
-				StudioTestService:ExecutePlayModeAsync({})
+		local lastError = nil
+
+		for attempt = 1, MAX_RETRIES do
+			-- Use task.spawn because ExecutePlayModeAsync blocks until playtest starts.
+			-- We need to return the HTTP response reasonably quickly.
+			local startError = nil
+			local completed = false
+
+			task.spawn(function()
+				local success, err = pcall(function()
+					StudioTestService:ExecutePlayModeAsync({})
+				end)
+				completed = true
+				if not success then
+					startError = tostring(err)
+				end
 			end)
-			if not success then
-				startError = tostring(err)
-				warn("[MCP] ExecutePlayModeAsync failed: " .. startError)
+
+			-- Wait a short time for immediate errors (like "pending" or "already running")
+			task.wait(ERROR_CHECK_DELAY)
+
+			if completed and startError then
+				-- Got an immediate error
+				lastError = startError
+
+				-- Check if it's the "pending operation" error - if so, retry after delay
+				if string.find(startError, "Previous call to start play session has not been completed") then
+					if attempt < MAX_RETRIES then
+						warn(string.format("[MCP] Playtest pending, retry %d/%d in %.1fs...", attempt, MAX_RETRIES, RETRY_DELAY))
+						task.wait(RETRY_DELAY)
+						continue
+					end
+				else
+					-- Different error, don't retry
+					break
+				end
+			elseif not completed then
+				-- No immediate error and still running = playtest is starting successfully
+				return HttpService:JSONEncode({
+					success = true,
+					mode = "playtest",
+					hasPlayer = true,
+					note = "Started playtest mode (F5) via StudioTestService.",
+					attempts = attempt,
+				})
+			else
+				-- Completed with no error = success
+				return HttpService:JSONEncode({
+					success = true,
+					mode = "playtest",
+					hasPlayer = true,
+					note = "Started playtest mode (F5) via StudioTestService.",
+					attempts = attempt,
+				})
 			end
-		end)
-
-		-- Give it a moment to check for immediate errors (like "already running")
-		task.wait(0.5)
-
-		if startError then
-			return HttpService:JSONEncode({
-				success = false,
-				error = "ExecutePlayModeAsync failed: " .. startError,
-				suggestion = "Try stopping any pending playtest operations first.",
-			})
 		end
 
-		-- Command was sent - playtest should be starting
 		return HttpService:JSONEncode({
-			success = true,
-			mode = "playtest",
-			hasPlayer = true,
-			note = "Started playtest mode (F5) via StudioTestService. State cannot be verified from plugin context.",
+			success = false,
+			error = "ExecutePlayModeAsync failed: " .. (lastError or "unknown error"),
+			suggestion = "Press F6 to manually stop any pending playtest, then try again.",
 		})
 	end
 
