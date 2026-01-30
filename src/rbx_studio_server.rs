@@ -30,6 +30,322 @@ const SCREENSHOT_TIMEOUT_SECS: u64 = 10;
 // Tool execution timeout - must be longer than Lua-side verification timeout (10s)
 const TOOL_EXECUTION_TIMEOUT: Duration = Duration::from_secs(30);
 
+// Script source for auto-installation
+const MCP_INPUT_POLLER_SOURCE: &str = r#"-- Auto-installed by MCP Server for input simulation support
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+-- Configuration
+local MCP_URL = "http://localhost:44755/mcp/input"
+local POLL_INTERVAL = 0.1  -- Poll every 100ms
+
+-- Create RemoteEvent for server->client communication
+local inputEvent = ReplicatedStorage:FindFirstChild("MCPInputCommand")
+if not inputEvent then
+    inputEvent = Instance.new("RemoteEvent")
+    inputEvent.Name = "MCPInputCommand"
+    inputEvent.Parent = ReplicatedStorage
+end
+
+-- Send command to all connected players
+local function processCommand(command)
+    print("[MCPPoller] Received:", command.command_type)
+    for _, player in Players:GetPlayers() do
+        inputEvent:FireClient(player, command)
+    end
+end
+
+-- Main polling loop
+local function pollLoop()
+    print("[MCPPoller] Started - polling " .. MCP_URL)
+    while true do
+        local success, result = pcall(function()
+            local response = HttpService:GetAsync(MCP_URL)
+            return HttpService:JSONDecode(response)
+        end)
+
+        if success and result and result.commands then
+            if #result.commands > 0 then
+                print("[MCPPoller] Got", #result.commands, "commands!")
+            end
+            for _, command in ipairs(result.commands) do
+                processCommand(command)
+            end
+        end
+
+        task.wait(POLL_INTERVAL)
+    end
+end
+
+-- Start polling in background
+task.spawn(pollLoop)
+print("[MCPPoller] Script loaded - waiting for playtest to start polling")
+"#;
+
+const MCP_INPUT_HANDLER_SOURCE: &str = r#"-- Auto-installed by MCP Server for input simulation support
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+
+-- Key name to KeyCode mapping
+local KEY_MAP = {
+    A = Enum.KeyCode.A, B = Enum.KeyCode.B, C = Enum.KeyCode.C, D = Enum.KeyCode.D,
+    E = Enum.KeyCode.E, F = Enum.KeyCode.F, G = Enum.KeyCode.G, H = Enum.KeyCode.H,
+    I = Enum.KeyCode.I, J = Enum.KeyCode.J, K = Enum.KeyCode.K, L = Enum.KeyCode.L,
+    M = Enum.KeyCode.M, N = Enum.KeyCode.N, O = Enum.KeyCode.O, P = Enum.KeyCode.P,
+    Q = Enum.KeyCode.Q, R = Enum.KeyCode.R, S = Enum.KeyCode.S, T = Enum.KeyCode.T,
+    U = Enum.KeyCode.U, V = Enum.KeyCode.V, W = Enum.KeyCode.W, X = Enum.KeyCode.X,
+    Y = Enum.KeyCode.Y, Z = Enum.KeyCode.Z,
+    Space = Enum.KeyCode.Space,
+    Return = Enum.KeyCode.Return,
+    Tab = Enum.KeyCode.Tab,
+    Escape = Enum.KeyCode.Escape,
+    Backspace = Enum.KeyCode.Backspace,
+    LeftShift = Enum.KeyCode.LeftShift,
+    RightShift = Enum.KeyCode.RightShift,
+    LeftControl = Enum.KeyCode.LeftControl,
+    RightControl = Enum.KeyCode.RightControl,
+    LeftAlt = Enum.KeyCode.LeftAlt,
+    RightAlt = Enum.KeyCode.RightAlt,
+    Up = Enum.KeyCode.Up,
+    Down = Enum.KeyCode.Down,
+    Left = Enum.KeyCode.Left,
+    Right = Enum.KeyCode.Right,
+    One = Enum.KeyCode.One, Two = Enum.KeyCode.Two, Three = Enum.KeyCode.Three,
+    Four = Enum.KeyCode.Four, Five = Enum.KeyCode.Five, Six = Enum.KeyCode.Six,
+    Seven = Enum.KeyCode.Seven, Eight = Enum.KeyCode.Eight, Nine = Enum.KeyCode.Nine,
+    Zero = Enum.KeyCode.Zero,
+}
+
+local MOUSE_MAP = {
+    Left = Enum.UserInputType.MouseButton1,
+    Right = Enum.UserInputType.MouseButton2,
+    Middle = Enum.UserInputType.MouseButton3,
+}
+
+local function findGui(path)
+    if not player.PlayerGui then return nil end
+    local parts = string.split(path, ".")
+    local current = player.PlayerGui
+    if parts[1] == "PlayerGui" or parts[1] == "StarterGui" then
+        table.remove(parts, 1)
+    end
+    for _, part in ipairs(parts) do
+        current = current:FindFirstChild(part)
+        if not current then return nil end
+    end
+    return current
+end
+
+local function getEvent(name)
+    local e = ReplicatedStorage:FindFirstChild(name)
+    if not e then
+        e = Instance.new("BindableEvent")
+        e.Name = name
+        e.Parent = ReplicatedStorage
+    end
+    return e
+end
+
+local function handleKeyboard(data)
+    local keyCode = KEY_MAP[data.key]
+    if not keyCode then
+        warn("[MCPInput] Unknown key:", data.key)
+        return
+    end
+    local event = getEvent("MCPInputReceived")
+    local info = {
+        KeyCode = keyCode,
+        UserInputType = Enum.UserInputType.Keyboard
+    }
+    if data.action == "tap" then
+        info.UserInputState = Enum.UserInputState.Begin
+        event:Fire(info)
+        task.wait(0.05)
+        info.UserInputState = Enum.UserInputState.End
+        event:Fire(info)
+    else
+        info.UserInputState = data.action == "begin"
+            and Enum.UserInputState.Begin
+            or Enum.UserInputState.End
+        event:Fire(info)
+    end
+    print("[MCPInput] Key:", data.key, data.action)
+end
+
+local function handleMouse(data)
+    local button = MOUSE_MAP[data.key]
+    if not button then
+        warn("[MCPInput] Unknown mouse button:", data.key)
+        return
+    end
+    local event = getEvent("MCPInputReceived")
+    local info = {
+        UserInputType = button,
+        Position = Vector3.new(data.mouseX or 0, data.mouseY or 0, 0)
+    }
+    if data.action == "tap" then
+        info.UserInputState = Enum.UserInputState.Begin
+        event:Fire(info)
+        task.wait(0.05)
+        info.UserInputState = Enum.UserInputState.End
+        event:Fire(info)
+    else
+        info.UserInputState = data.action == "begin"
+            and Enum.UserInputState.Begin
+            or Enum.UserInputState.End
+        event:Fire(info)
+    end
+    print("[MCPInput] Mouse:", data.key, data.action)
+end
+
+local function handleGuiClick(data)
+    local element = findGui(data.path)
+    if not element then
+        warn("[MCPInput] GUI not found:", data.path)
+        return
+    end
+    local event = getEvent("MCPGuiClicked")
+    event:Fire({
+        element = element,
+        path = data.path,
+        absolutePosition = element.AbsolutePosition,
+        absoluteSize = element.AbsoluteSize,
+    })
+    print("[MCPInput] GUI clicked:", data.path)
+end
+
+local inputCommand = ReplicatedStorage:WaitForChild("MCPInputCommand", 10)
+if inputCommand then
+    inputCommand.OnClientEvent:Connect(function(command)
+        local data = command.data
+        if command.command_type == "input" then
+            if data.inputType == "keyboard" then
+                handleKeyboard(data)
+            elseif data.inputType == "mouse" then
+                handleMouse(data)
+            end
+        elseif command.command_type == "gui_click" then
+            handleGuiClick(data)
+        end
+    end)
+    print("[MCPInput] Client handler ready!")
+else
+    warn("[MCPInput] Failed to find MCPInputCommand - is MCPInputPoller running?")
+end
+"#;
+
+// Movement handler - translates MCPInputReceived events into actual character movement
+const MCP_MOVEMENT_HANDLER_SOURCE: &str = r#"-- Auto-installed by MCP Server for character movement simulation
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+
+-- Track which keys are "pressed" via MCP
+local keysDown = {
+    W = false, A = false, S = false, D = false, Space = false,
+}
+
+-- Get or create the MCP input event
+local mcpInputEvent = ReplicatedStorage:FindFirstChild("MCPInputReceived")
+if not mcpInputEvent then
+    mcpInputEvent = Instance.new("BindableEvent")
+    mcpInputEvent.Name = "MCPInputReceived"
+    mcpInputEvent.Parent = ReplicatedStorage
+end
+
+-- Handle MCP input events
+mcpInputEvent.Event:Connect(function(inputInfo)
+    local keyCode = inputInfo.KeyCode
+    local state = inputInfo.UserInputState
+
+    local keyName = nil
+    if keyCode == Enum.KeyCode.W then keyName = "W"
+    elseif keyCode == Enum.KeyCode.A then keyName = "A"
+    elseif keyCode == Enum.KeyCode.S then keyName = "S"
+    elseif keyCode == Enum.KeyCode.D then keyName = "D"
+    elseif keyCode == Enum.KeyCode.Space then keyName = "Space"
+    end
+
+    if keyName then
+        keysDown[keyName] = (state == Enum.UserInputState.Begin)
+    end
+end)
+
+-- Movement loop
+RunService.Heartbeat:Connect(function(dt)
+    local character = player.Character
+    if not character then return end
+
+    local humanoid = character:FindFirstChild("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not rootPart then return end
+
+    local moveDir = Vector3.zero
+    local camera = workspace.CurrentCamera
+
+    if camera then
+        local camCF = camera.CFrame
+        local forward = camCF.LookVector * Vector3.new(1, 0, 1)
+        local right = camCF.RightVector * Vector3.new(1, 0, 1)
+
+        if forward.Magnitude > 0 then forward = forward.Unit end
+        if right.Magnitude > 0 then right = right.Unit end
+
+        if keysDown.W then moveDir = moveDir + forward end
+        if keysDown.S then moveDir = moveDir - forward end
+        if keysDown.D then moveDir = moveDir + right end
+        if keysDown.A then moveDir = moveDir - right end
+    end
+
+    if moveDir.Magnitude > 0 then
+        moveDir = moveDir.Unit
+        humanoid:Move(moveDir, false)
+    end
+
+    if keysDown.Space and humanoid.FloorMaterial ~= Enum.Material.Air then
+        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        keysDown.Space = false
+    end
+end)
+
+print("[MCPMovement] Handler ready - WASD and Space supported")
+"#;
+
+// Click support - makes click_gui trigger real button clicks
+const MCP_CLICK_SUPPORT_SOURCE: &str = r#"-- Auto-installed by MCP Server for GUI click simulation
+-- Use: local MCP = require(game.ReplicatedStorage.MCPClickSupport)
+--      MCP.onClick(button, function() ... end)
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local MCPClickSupport = {}
+
+local mcpEvent = ReplicatedStorage:FindFirstChild("MCPGuiClicked")
+if not mcpEvent then
+    mcpEvent = Instance.new("BindableEvent")
+    mcpEvent.Name = "MCPGuiClicked"
+    mcpEvent.Parent = ReplicatedStorage
+end
+
+function MCPClickSupport.onClick(button, callback)
+    button.MouseButton1Click:Connect(callback)
+    mcpEvent.Event:Connect(function(data)
+        if data.element == button then
+            callback()
+        end
+    end)
+end
+
+print("[MCPClickSupport] Module loaded")
+
+return MCPClickSupport
+"#;
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ToolArguments {
     args: ToolArgumentValues,
@@ -161,6 +477,10 @@ struct WriteScript {
     path: String,
     #[schemars(description = "The Luau source code to write to the script")]
     source: String,
+    #[schemars(
+        description = "Type of script to create: 'Script', 'LocalScript', or 'ModuleScript'. Defaults to 'Script'. Only used when creating new scripts."
+    )]
+    script_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema, Clone)]
@@ -429,13 +749,135 @@ impl RBXStudioServer {
             .await
     }
 
+    /// Internal helper to run a tool and get the raw string result
+    async fn run_tool_raw(&self, args: ToolArgumentValues) -> Result<String, String> {
+        let (command, id) = ToolArguments::new(args);
+        let (tx, mut rx) = mpsc::unbounded_channel::<Result<String>>();
+        let trigger = {
+            let mut state = self.state.lock().await;
+            state.process_queue.push_back(command);
+            state.output_map.insert(id, tx);
+            state.trigger.clone()
+        };
+
+        if trigger.send(()).is_err() {
+            return Err("Failed to trigger command".to_string());
+        }
+
+        let result = match timeout(TOOL_EXECUTION_TIMEOUT, rx.recv()).await {
+            Ok(Some(result)) => result,
+            Ok(None) => {
+                let mut state = self.state.lock().await;
+                state.output_map.remove_entry(&id);
+                return Err("Channel closed".to_string());
+            }
+            Err(_) => {
+                let mut state = self.state.lock().await;
+                state.output_map.remove_entry(&id);
+                return Err("Timeout".to_string());
+            }
+        };
+
+        {
+            let mut state = self.state.lock().await;
+            state.output_map.remove_entry(&id);
+        }
+
+        result.map_err(|e| e.to_string())
+    }
+
+    /// Check if MCP input scripts are installed, and install them if not.
+    /// Returns (scripts_were_installed, error_message_if_any)
+    async fn ensure_input_scripts_installed(&self) -> (bool, Option<String>) {
+        // Check if all MCP scripts exist
+        let check_code = r#"
+            local poller = game:GetService("ServerScriptService"):FindFirstChild("MCPInputPoller")
+            local sps = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+            local handler = sps and sps:FindFirstChild("MCPInputHandler")
+            local movement = sps and sps:FindFirstChild("MCPMovementHandler")
+            local clickSupport = game:GetService("ReplicatedStorage"):FindFirstChild("MCPClickSupport")
+            return tostring(poller ~= nil) .. "," .. tostring(handler ~= nil) .. "," .. tostring(movement ~= nil) .. "," .. tostring(clickSupport ~= nil)
+        "#;
+
+        let scripts_status = match self.run_tool_raw(ToolArgumentValues::RunCode(RunCode {
+            command: check_code.to_string(),
+        })).await {
+            Ok(status) => status,
+            Err(e) => {
+                return (false, Some(format!("Failed to check scripts: {}", e)));
+            }
+        };
+
+        let parts: Vec<&str> = scripts_status.trim().split(',').collect();
+        let poller_exists = parts.first().map_or(false, |s| s.contains("true"));
+        let handler_exists = parts.get(1).map_or(false, |s| s.contains("true"));
+        let movement_exists = parts.get(2).map_or(false, |s| s.contains("true"));
+        let click_support_exists = parts.get(3).map_or(false, |s| s.contains("true"));
+
+        if poller_exists && handler_exists && movement_exists && click_support_exists {
+            return (false, None); // Scripts already installed
+        }
+
+        // Install missing scripts
+        let mut installed = Vec::new();
+
+        if !poller_exists {
+            if self.run_tool_raw(ToolArgumentValues::WriteScript(WriteScript {
+                path: "ServerScriptService.MCPInputPoller".to_string(),
+                source: MCP_INPUT_POLLER_SOURCE.to_string(),
+                script_type: Some("Script".to_string()),
+            })).await.is_err() {
+                return (false, Some("Failed to install MCPInputPoller script".to_string()));
+            }
+            installed.push("MCPInputPoller (ServerScriptService)");
+        }
+
+        if !handler_exists {
+            if self.run_tool_raw(ToolArgumentValues::WriteScript(WriteScript {
+                path: "StarterPlayer.StarterPlayerScripts.MCPInputHandler".to_string(),
+                source: MCP_INPUT_HANDLER_SOURCE.to_string(),
+                script_type: Some("LocalScript".to_string()),
+            })).await.is_err() {
+                return (false, Some("Failed to install MCPInputHandler script".to_string()));
+            }
+            installed.push("MCPInputHandler (StarterPlayerScripts)");
+        }
+
+        if !movement_exists {
+            if self.run_tool_raw(ToolArgumentValues::WriteScript(WriteScript {
+                path: "StarterPlayer.StarterPlayerScripts.MCPMovementHandler".to_string(),
+                source: MCP_MOVEMENT_HANDLER_SOURCE.to_string(),
+                script_type: Some("LocalScript".to_string()),
+            })).await.is_err() {
+                return (false, Some("Failed to install MCPMovementHandler script".to_string()));
+            }
+            installed.push("MCPMovementHandler (StarterPlayerScripts)");
+        }
+
+        if !click_support_exists {
+            if self.run_tool_raw(ToolArgumentValues::WriteScript(WriteScript {
+                path: "ReplicatedStorage.MCPClickSupport".to_string(),
+                source: MCP_CLICK_SUPPORT_SOURCE.to_string(),
+                script_type: Some("ModuleScript".to_string()),
+            })).await.is_err() {
+                return (false, Some("Failed to install MCPClickSupport module".to_string()));
+            }
+            installed.push("MCPClickSupport (ReplicatedStorage)");
+        }
+
+        (true, if installed.is_empty() { None } else { Some(installed.join(", ")) })
+    }
+
     #[tool(
-        description = "Simulates keyboard or mouse input during playtest. The game must include an MCPInputPoller LocalScript that polls http://localhost:44755/mcp/input to receive commands. Supports keyboard keys (W, A, S, D, Space, E, etc.) and mouse buttons (Left, Right, Middle)."
+        description = "Simulates keyboard or mouse input during playtest. Required scripts (MCPInputPoller, MCPInputHandler) will be auto-installed if missing. Supports keyboard keys (W, A, S, D, Space, E, etc.) and mouse buttons (Left, Right, Middle)."
     )]
     async fn simulate_input(
         &self,
         Parameters(args): Parameters<SimulateInput>,
     ) -> Result<CallToolResult, ErrorData> {
+        // Check and install scripts if needed
+        let (scripts_installed, installed_names) = self.ensure_input_scripts_installed().await;
+
         let command = InputCommand {
             command_type: "input".to_string(),
             data: serde_json::json!({
@@ -450,7 +892,6 @@ impl RBXStudioServer {
         };
 
         // POST to the HTTP server to ensure command reaches the right instance
-        // (handles proxy mode where this instance may not have the HTTP server)
         let client = reqwest::Client::new();
         let result = client
             .post(format!("http://127.0.0.1:{STUDIO_PLUGIN_PORT}/mcp/input"))
@@ -460,10 +901,19 @@ impl RBXStudioServer {
 
         match result {
             Ok(response) if response.status().is_success() => {
-                Ok(CallToolResult::success(vec![Content::text(format!(
-                    "Queued {} input: {} {} (id: {}). Game must poll /mcp/input to receive.",
+                let mut message = format!(
+                    "Queued {} input: {} {} (id: {}).",
                     args.input_type, args.key, args.action, command.id
-                ))]))
+                );
+                if scripts_installed {
+                    if let Some(names) = installed_names {
+                        message.push_str(&format!(
+                            "\n\n✅ Auto-installed required scripts: {}.\nNote: You must restart playtest (stop and F5 again) for the scripts to take effect.",
+                            names
+                        ));
+                    }
+                }
+                Ok(CallToolResult::success(vec![Content::text(message)]))
             }
             Ok(response) => {
                 Ok(CallToolResult::error(vec![Content::text(format!(
@@ -481,12 +931,15 @@ impl RBXStudioServer {
     }
 
     #[tool(
-        description = "Simulates clicking a GUI element during playtest. The game must include an MCPInputPoller LocalScript that polls http://localhost:44755/mcp/input to receive commands. Provide the path to the GUI element (e.g., 'ScreenGui.PlayButton')."
+        description = "Simulates clicking a GUI element during playtest. Required scripts (MCPInputPoller, MCPInputHandler) will be auto-installed if missing. Provide the path to the GUI element (e.g., 'ScreenGui.PlayButton')."
     )]
     async fn click_gui(
         &self,
         Parameters(args): Parameters<ClickGui>,
     ) -> Result<CallToolResult, ErrorData> {
+        // Check and install scripts if needed
+        let (scripts_installed, installed_names) = self.ensure_input_scripts_installed().await;
+
         let command = InputCommand {
             command_type: "gui_click".to_string(),
             data: serde_json::json!({
@@ -497,7 +950,6 @@ impl RBXStudioServer {
         };
 
         // POST to the HTTP server to ensure command reaches the right instance
-        // (handles proxy mode where this instance may not have the HTTP server)
         let client = reqwest::Client::new();
         let result = client
             .post(format!("http://127.0.0.1:{STUDIO_PLUGIN_PORT}/mcp/input"))
@@ -507,10 +959,19 @@ impl RBXStudioServer {
 
         match result {
             Ok(response) if response.status().is_success() => {
-                Ok(CallToolResult::success(vec![Content::text(format!(
-                    "Queued GUI click: {} (id: {}). Game must poll /mcp/input to receive.",
+                let mut message = format!(
+                    "Queued GUI click: {} (id: {}).",
                     args.path, command.id
-                ))]))
+                );
+                if scripts_installed {
+                    if let Some(names) = installed_names {
+                        message.push_str(&format!(
+                            "\n\n✅ Auto-installed required scripts: {}.\nNote: You must restart playtest (stop and F5 again) for the scripts to take effect.",
+                            names
+                        ));
+                    }
+                }
+                Ok(CallToolResult::success(vec![Content::text(message)]))
             }
             Ok(response) => {
                 Ok(CallToolResult::error(vec![Content::text(format!(
