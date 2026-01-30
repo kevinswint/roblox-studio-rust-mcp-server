@@ -48,6 +48,9 @@ fn get_cursor_config() -> Result<PathBuf> {
     Ok(Path::new(&home_dir).join(".cursor").join("mcp.json"))
 }
 
+/// Returns the exe path, preferring release build over debug.
+/// This ensures that even when running `cargo run` (debug), the config
+/// will point to the release binary for better performance.
 #[cfg(target_os = "macos")]
 fn get_exe_path() -> Result<PathBuf> {
     use core_foundation::url::CFURL;
@@ -57,12 +60,26 @@ fn get_exe_path() -> Result<PathBuf> {
     let un_relocated = security_translocate::create_original_path_for_url(local_path_cref.clone())
         .or_else(move |_| Ok::<CFURL, io::Error>(local_path_cref.clone()))?;
     let ret = un_relocated.to_path().unwrap();
-    Ok(ret)
+    Ok(prefer_release_build(ret))
 }
 
 #[cfg(not(target_os = "macos"))]
 fn get_exe_path() -> io::Result<PathBuf> {
-    env::current_exe()
+    env::current_exe().map(prefer_release_build)
+}
+
+/// If running from target/debug, return the equivalent target/release path instead.
+/// This ensures consistent behavior regardless of how the installer was invoked.
+fn prefer_release_build(path: PathBuf) -> PathBuf {
+    let path_str = path.to_string_lossy();
+    if path_str.contains("target/debug") || path_str.contains("target\\debug") {
+        let release_path = path_str
+            .replace("target/debug", "target/release")
+            .replace("target\\debug", "target\\release");
+        PathBuf::from(release_path)
+    } else {
+        path
+    }
 }
 
 pub fn install_to_config<'a>(
